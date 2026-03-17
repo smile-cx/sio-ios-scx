@@ -111,8 +111,8 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "\(prefix)Starscream", targets: ["\(prefix)Starscream"]),
-                .library(name: "\(prefix)SocketIO",   targets: ["\(prefix)SocketIO"]),
+                .library(name: "\(prefix)Starscream", type: .dynamic, targets: ["\(prefix)Starscream"]),
+                .library(name: "\(prefix)SocketIO",   type: .dynamic, targets: ["\(prefix)SocketIO"]),
             ],
             targets: [
                 .target(
@@ -183,9 +183,9 @@ jobs:
             BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
             ONLY_ACTIVE_ARCH=NO
 
-          # Locate the .framework inside each archive
-          IOS_FW=$(find "$IOS_ARCHIVE/Products" -name "${SCHEME}.framework" -type d | head -1)
-          SIM_FW=$(find "$SIM_ARCHIVE/Products" -name "${SCHEME}.framework" -type d | head -1)
+          # Locate the .framework inside each archive (search entire archive)
+          IOS_FW=$(find "$IOS_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
+          SIM_FW=$(find "$SIM_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
 
           if [ -z "$IOS_FW" ] || [ -z "$SIM_FW" ]; then
             echo "ERROR: framework not found in archives for $SCHEME"
