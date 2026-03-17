@@ -161,6 +161,7 @@ jobs:
         SCHEMES=("${PREFIX}Starscream" "${PREFIX}SocketIO")
         ARCHIVE_DIR="$(pwd)/build/archives"
         OUTPUT_DIR="$(pwd)/build/output"
+        DD="$(pwd)/build/DerivedData"
         mkdir -p "$ARCHIVE_DIR" "$OUTPUT_DIR"
 
         cd build-pkg
@@ -180,6 +181,7 @@ jobs:
             -scheme "$SCHEME" \
             -destination "generic/platform=iOS" \
             -archivePath "$IOS_ARCHIVE" \
+            -derivedDataPath "$DD" \
             -configuration Release \
             -skipPackagePluginValidation \
             SKIP_INSTALL=NO \
@@ -192,21 +194,20 @@ jobs:
             -scheme "$SCHEME" \
             -destination "generic/platform=iOS Simulator" \
             -archivePath "$SIM_ARCHIVE" \
+            -derivedDataPath "$DD" \
             -configuration Release \
             -skipPackagePluginValidation \
             SKIP_INSTALL=NO \
             BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
             ONLY_ACTIVE_ARCH=NO
 
-          # Locate the .framework inside each archive (search entire archive)
+          # Locate the .framework inside each archive
           IOS_FW=$(find "$IOS_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
           SIM_FW=$(find "$SIM_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
 
           if [ -z "$IOS_FW" ] || [ -z "$SIM_FW" ]; then
             echo "ERROR: framework not found in archives for $SCHEME"
-            echo "iOS archive contents:"
             find "$IOS_ARCHIVE" -name "*.framework" -type d 2>/dev/null
-            echo "Sim archive contents:"
             find "$SIM_ARCHIVE" -name "*.framework" -type d 2>/dev/null
             exit 1
           fi
@@ -215,41 +216,42 @@ jobs:
           echo "Sim framework:  $SIM_FW"
 
           # Copy Swift modules and headers into framework bundles
-          # xcodebuild archive for SPM dynamic libs places these outside the .framework
+          # xcodebuild archive puts swiftmodule/headers in DerivedData, not in .framework
           for ARCHIVE in "$IOS_ARCHIVE" "$SIM_ARCHIVE"; do
             FW=$(find "$ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
             if [ -z "$FW" ]; then continue; fi
 
-            # Find and copy .swiftmodule directory
-            SWIFTMOD=$(find "$ARCHIVE" -path "*/Release-*/PackageFrameworks/${SCHEME}.framework" -prune -o \
-              -name "${SCHEME}.swiftmodule" -type d -print | head -1)
-            if [ -z "$SWIFTMOD" ]; then
-              SWIFTMOD=$(find "$ARCHIVE/Products" -name "${SCHEME}.swiftmodule" -type d | head -1)
-            fi
+            echo "  Searching for swiftmodule and headers in DerivedData and archive..."
+
+            # Search in both the archive AND DerivedData for swiftmodule
+            SWIFTMOD=$(find "$DD" "$ARCHIVE" -name "${SCHEME}.swiftmodule" -type d 2>/dev/null | grep -v "PackageFrameworks" | head -1)
+            HEADER=$(find "$DD" "$ARCHIVE" -name "${SCHEME}-Swift.h" -type f 2>/dev/null | head -1)
+            MODULEMAP=$(find "$DD" "$ARCHIVE" -name "${SCHEME}.modulemap" -path "*/${SCHEME}.build/*" -type f 2>/dev/null | head -1)
+
             if [ -n "$SWIFTMOD" ]; then
               mkdir -p "$FW/Modules"
               cp -R "$SWIFTMOD" "$FW/Modules/"
-              echo "  Copied swiftmodule into $FW"
+              echo "  Copied swiftmodule from: $SWIFTMOD"
+            else
+              echo "  WARNING: swiftmodule not found for $SCHEME"
+              echo "  Searching all .swiftmodule dirs:"
+              find "$DD" "$ARCHIVE" -name "*.swiftmodule" -type d 2>/dev/null | head -10
             fi
 
-            # Find and copy Swift generated header
-            HEADER=$(find "$ARCHIVE" -name "${SCHEME}-Swift.h" -type f | head -1)
             if [ -n "$HEADER" ]; then
               mkdir -p "$FW/Headers"
               cp "$HEADER" "$FW/Headers/"
-              echo "  Copied header into $FW"
+              echo "  Copied header from: $HEADER"
             fi
 
-            # Find and copy modulemap
-            MODULEMAP=$(find "$ARCHIVE" -path "*/${SCHEME}.build/${SCHEME}.modulemap" -type f | head -1)
             if [ -n "$MODULEMAP" ]; then
               mkdir -p "$FW/Modules"
               cp "$MODULEMAP" "$FW/Modules/module.modulemap"
-              echo "  Copied modulemap into $FW"
+              echo "  Copied modulemap from: $MODULEMAP"
             fi
 
-            echo "  Framework contents:"
-            find "$FW" -type f | head -20
+            echo "  Framework contents after copy:"
+            find "$FW" -type f | sort
           done
 
           # Create XCFramework
@@ -259,6 +261,15 @@ jobs:
             -output "$OUTPUT_DIR/${SCHEME}.xcframework"
 
           echo "$SCHEME.xcframework created successfully"
+
+          # Verify the XCFramework has modules
+          if find "$OUTPUT_DIR/${SCHEME}.xcframework" -name "*.swiftmodule" -type d | grep -q .; then
+            echo "  Modules verified in XCFramework"
+          else
+            echo "  ERROR: Modules MISSING from XCFramework!"
+            find "$OUTPUT_DIR/${SCHEME}.xcframework" -type f | sort
+            exit 1
+          fi
         done
 
         cd ..
