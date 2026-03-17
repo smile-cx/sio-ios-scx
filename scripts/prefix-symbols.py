@@ -114,25 +114,48 @@ def extract_symbols(swift_files: list[str]) -> set[str]:
     return symbols
 
 
-def rename_symbols_in_content(content: str, rename_map: dict[str, str]) -> str:
+def rename_symbols_in_content(content: str, rename_map: dict[str, str],
+                              own_types: set[str]) -> str:
     """
     Apply symbol renames using whole-word boundary matching.
 
     Sorts by length descending to avoid partial replacements
     (e.g., "SocketEngine" before "Socket").
 
-    Uses negative lookbehind (?<!\.) to avoid renaming symbols used as
-    member access on system types (e.g. Stream.Event, URLSessionWebSocketTask.CloseCode).
+    When a symbol appears after a dot (e.g. Foo.Event), it checks whether
+    the qualifier before the dot is one of OUR types or a system type:
+    - OurType.Event  -> SCXOurType.SCXEvent  (rename)
+    - Stream.Event   -> Stream.Event         (keep)
     """
     # Sort by length descending so longer names are replaced first
     sorted_names = sorted(rename_map.keys(), key=len, reverse=True)
 
     for old_name in sorted_names:
         new_name = rename_map[old_name]
-        # (?<!\.) prevents renaming after a dot (member access on system types)
-        # \b at the end ensures whole-word matching
-        pattern = re.compile(r'(?<!\.)\b' + re.escape(old_name) + r'\b')
-        content = pattern.sub(new_name, content)
+        pattern = re.compile(r'\b' + re.escape(old_name) + r'\b')
+
+        def make_replacer(new_name_val):
+            def replacer(match):
+                start = match.start()
+                text = match.string
+                # Check if preceded by a dot (member access)
+                if start > 0 and text[start - 1] == '.':
+                    # Walk backwards past the dot to find the qualifier word
+                    dot_pos = start - 1
+                    word_end = dot_pos
+                    word_start = word_end
+                    while word_start > 0 and (text[word_start - 1].isalnum() or text[word_start - 1] == '_'):
+                        word_start -= 1
+                    qualifier = text[word_start:word_end]
+                    # Only rename if the qualifier is one of our own types
+                    if qualifier in own_types:
+                        return new_name_val
+                    else:
+                        return match.group(0)  # system type, don't rename
+                return new_name_val
+            return replacer
+
+        content = pattern.sub(make_replacer(new_name), content)
 
     return content
 
@@ -174,13 +197,16 @@ def process_files(source_dir: str, prefix: str, dry_run: bool = False) -> dict[s
         print("\n[DRY RUN] No files modified.")
         return rename_map
 
+    # Build the set of "our" types: both original and prefixed names
+    own_types = set(rename_map.keys()) | set(rename_map.values())
+
     # Apply renames
     print(f"\nApplying renames to {len(swift_files)} files...")
     for filepath in swift_files:
         with open(filepath, 'r', encoding='utf-8') as f:
             original = f.read()
 
-        modified = rename_symbols_in_content(original, rename_map)
+        modified = rename_symbols_in_content(original, rename_map, own_types)
 
         if modified != original:
             with open(filepath, 'w', encoding='utf-8') as f:
