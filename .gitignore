@@ -60,3 +60,20 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Project specific
+build/
+dist/
+DerivedData/
+test-build/
+socketio-source/
+starscream-source/
+*.xcarchive
+*.backup
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

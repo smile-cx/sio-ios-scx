@@ -1,0 +1,56 @@
+name: Validate PR
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    name: Validate Changes
+    runs-on: macos-14
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+
+    - name: Validate Package.swift
+      run: |
+        swift package resolve
+        swift package dump-package
+
+    - name: Check script syntax
+      run: |
+        bash -n scripts/prefix-symbols.sh
+        bash -n scripts/build-xcframework.sh
+
+    - name: Validate Privacy Manifest
+      run: |
+        if [ ! -f "Resources/PrivacyInfo.xcprivacy" ]; then
+          echo "Error: PrivacyInfo.xcprivacy not found"
+          exit 1
+        fi
+        plutil -lint Resources/PrivacyInfo.xcprivacy
+
+    - name: Check for required files
+      run: |
+        required_files=(
+          "Package.swift"
+          "README.md"
+          "Resources/PrivacyInfo.xcprivacy"
+          "scripts/prefix-symbols.sh"
+          "scripts/build-xcframework.sh"
+        )
+
+        for file in "${required_files[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "Error: Required file missing: $file"
+            exit 1
+          fi
+        done
+
+        echo "All required files present"

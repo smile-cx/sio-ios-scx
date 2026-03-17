@@ -1,0 +1,167 @@
+name: Build and Release Prefixed Socket.IO
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., v16.1.0)'
+        required: true
+        default: 'v16.1.0'
+
+env:
+  PREFIX: SCX
+  SOCKETIO_REPO: https://github.com/socketio/socket.io-client-swift.git
+  STARSCREAM_REPO: https://github.com/daltoniam/Starscream.git
+
+jobs:
+  build:
+    name: Build Prefixed Framework
+    runs-on: macos-14
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+
+    - name: Install dependencies
+      run: |
+        brew install gnu-sed rename
+
+    - name: Clone Socket.IO and dependencies
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        echo "Building version: $VERSION"
+
+        # Clone Socket.IO client
+        git clone --depth 1 --branch $VERSION $SOCKETIO_REPO socketio-source
+
+        # Clone Starscream (dependency)
+        cd socketio-source
+        STARSCREAM_VERSION=$(grep -A 2 'url.*Starscream' Package.swift | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
+        cd ..
+
+        if [ -z "$STARSCREAM_VERSION" ]; then
+          STARSCREAM_VERSION="4.0.8"
+        fi
+
+        git clone --depth 1 --branch $STARSCREAM_VERSION $STARSCREAM_REPO starscream-source || \
+        git clone --depth 1 $STARSCREAM_REPO starscream-source
+
+    - name: Prefix Starscream symbols
+      run: |
+        ./scripts/prefix-symbols.sh starscream-source Sources/Starscream Starscream $PREFIX
+
+        # Update Starscream Package.swift
+        cd starscream-source
+        gsed -i "s/name: \"Starscream\"/name: \"${PREFIX}Starscream\"/g" Package.swift
+        gsed -i "s/\"Starscream\"/\"${PREFIX}Starscream\"/g" Package.swift
+        cd ..
+
+    - name: Prefix Socket.IO symbols
+      run: |
+        ./scripts/prefix-symbols.sh socketio-source Source/SocketIO SocketIO $PREFIX
+
+        # Update Socket.IO Package.swift to use prefixed Starscream
+        cd socketio-source
+        gsed -i "s/name: \"SocketIO\"/name: \"${PREFIX}SocketIO\"/g" Package.swift
+        gsed -i "s/\"SocketIO\"/\"${PREFIX}SocketIO\"/g" Package.swift
+        gsed -i "s/import Starscream/import ${PREFIX}Starscream/g" Source/SocketIO/**/*.swift
+        cd ..
+
+    - name: Copy prefixed sources to main repo
+      run: |
+        mkdir -p Sources/${PREFIX}SocketIO
+        mkdir -p Sources/${PREFIX}Starscream
+
+        cp -r starscream-source/Sources/Starscream/* Sources/${PREFIX}Starscream/
+        cp -r socketio-source/Source/SocketIO/* Sources/${PREFIX}SocketIO/
+
+        # Copy privacy manifest
+        mkdir -p Sources/${PREFIX}SocketIO/Resources
+        cp Resources/PrivacyInfo.xcprivacy Sources/${PREFIX}SocketIO/Resources/
+
+    - name: Build XCFramework for iOS
+      run: |
+        ./scripts/build-xcframework.sh
+
+    - name: Create distributable package
+      run: |
+        VERSION="${{ github.event.inputs.version || github.ref_name }}"
+        ARCHIVE_NAME="${PREFIX}SocketIO-${VERSION}.zip"
+
+        # Create distribution directory
+        mkdir -p dist
+
+        # Copy XCFramework
+        cp -r build/*.xcframework dist/
+
+        # Copy SPM support files
+        cp Package.swift dist/
+        cp -r Sources dist/
+        cp -r Resources dist/
+        cp README.md dist/ 2>/dev/null || echo "# ${PREFIX}SocketIO" > dist/README.md
+
+        # Create archive
+        cd dist
+        zip -r ../$ARCHIVE_NAME .
+        cd ..
+
+        echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Generate checksums
+      run: |
+        shasum -a 256 $ARCHIVE_NAME > checksums.txt
+        cat checksums.txt
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ env.VERSION }}
+        name: Release ${{ env.VERSION }}
+        body: |
+          ## ${PREFIX}SocketIO ${{ env.VERSION }}
+
+          Prefixed build of Socket.IO Client Swift with '${{ env.PREFIX }}' prefix to avoid symbol conflicts.
+
+          ### Installation
+
+          #### Swift Package Manager
+          ```swift
+          dependencies: [
+              .package(url: "https://github.com/${{ github.repository }}", from: "${{ env.VERSION }}")
+          ]
+          ```
+
+          #### Manual Installation
+          Download and extract the XCFramework from the release assets.
+
+          ### Changes
+          - All Socket.IO classes prefixed with ${{ env.PREFIX }}
+          - All Starscream classes prefixed with ${{ env.PREFIX }}
+          - Privacy manifest included
+
+          ### Checksums
+          ```
+          $(cat checksums.txt)
+          ```
+        files: |
+          ${{ env.ARCHIVE_NAME }}
+          checksums.txt
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update Package.swift checksums
+      run: |
+        CHECKSUM=$(shasum -a 256 $ARCHIVE_NAME | awk '{print $1}')
+        echo "Checksum: $CHECKSUM"
+        echo "Update Package.swift with this checksum for binary target"
