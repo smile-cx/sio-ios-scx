@@ -1,68 +1,91 @@
 #!/bin/bash
+set -euo pipefail
 
-# Build XCFramework for iOS and iOS Simulator
-set -e
+# Build XCFrameworks from prefixed SPM package
+# Usage: ./build-xcframework.sh <package_dir> <output_dir> <scheme1> [scheme2 ...]
 
-PREFIX=${PREFIX:-SCX}
-BUILD_DIR="build"
-DERIVED_DATA="DerivedData"
+PACKAGE_DIR="${1:?Usage: $0 <package_dir> <output_dir> <scheme1> [scheme2 ...]}"
+OUTPUT_DIR="${2:?Usage: $0 <package_dir> <output_dir> <scheme1> [scheme2 ...]}"
+shift 2
+SCHEMES=("$@")
 
-echo "Building XCFramework with prefix: $PREFIX"
+if [ ${#SCHEMES[@]} -eq 0 ]; then
+    echo "Error: at least one scheme is required"
+    exit 1
+fi
 
-# Clean build directory
-rm -rf "$BUILD_DIR"
-rm -rf "$DERIVED_DATA"
-mkdir -p "$BUILD_DIR"
+ARCHIVE_DIR="$OUTPUT_DIR/archives"
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR" "$ARCHIVE_DIR"
 
-# Build schemes
-SCHEMES=("${PREFIX}SocketIO" "${PREFIX}Starscream")
+echo "================================================"
+echo "Building XCFrameworks"
+echo "Package: $PACKAGE_DIR"
+echo "Output:  $OUTPUT_DIR"
+echo "Schemes: ${SCHEMES[*]}"
+echo "================================================"
 
 for SCHEME in "${SCHEMES[@]}"; do
     echo ""
-    echo "================================================"
-    echo "Building $SCHEME"
-    echo "================================================"
+    echo "--- Building $SCHEME ---"
 
-    # Build for iOS devices
-    echo "Building for iOS devices..."
+    IOS_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-iOS.xcarchive"
+    SIM_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-Simulator.xcarchive"
+
+    # Build for iOS device
+    echo "  Building for iOS..."
     xcodebuild archive \
+        -workspace "$PACKAGE_DIR" \
         -scheme "$SCHEME" \
-        -archivePath "$BUILD_DIR/$SCHEME-iOS.xcarchive" \
-        -sdk iphoneos \
         -destination "generic/platform=iOS" \
+        -archivePath "$IOS_ARCHIVE" \
         -configuration Release \
-        -derivedDataPath "$DERIVED_DATA" \
         SKIP_INSTALL=NO \
         BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-        ONLY_ACTIVE_ARCH=NO
+        ONLY_ACTIVE_ARCH=NO \
+        2>&1 | tail -5
 
     # Build for iOS Simulator
-    echo "Building for iOS Simulator..."
+    echo "  Building for iOS Simulator..."
     xcodebuild archive \
+        -workspace "$PACKAGE_DIR" \
         -scheme "$SCHEME" \
-        -archivePath "$BUILD_DIR/$SCHEME-Simulator.xcarchive" \
-        -sdk iphonesimulator \
         -destination "generic/platform=iOS Simulator" \
+        -archivePath "$SIM_ARCHIVE" \
         -configuration Release \
-        -derivedDataPath "$DERIVED_DATA" \
         SKIP_INSTALL=NO \
         BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-        ONLY_ACTIVE_ARCH=NO
+        ONLY_ACTIVE_ARCH=NO \
+        2>&1 | tail -5
+
+    # Locate frameworks inside archives
+    IOS_FW=$(find "$IOS_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
+    SIM_FW=$(find "$SIM_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
+
+    if [ -z "$IOS_FW" ] || [ -z "$SIM_FW" ]; then
+        echo "Error: Could not find ${SCHEME}.framework in archives"
+        echo "iOS archive contents:"
+        find "$IOS_ARCHIVE" -name "*.framework" -type d
+        echo "Simulator archive contents:"
+        find "$SIM_ARCHIVE" -name "*.framework" -type d
+        exit 1
+    fi
+
+    echo "  Found iOS framework: $IOS_FW"
+    echo "  Found Sim framework: $SIM_FW"
 
     # Create XCFramework
-    echo "Creating XCFramework..."
+    echo "  Creating XCFramework..."
     xcodebuild -create-xcframework \
-        -archive "$BUILD_DIR/$SCHEME-iOS.xcarchive" -framework "$SCHEME.framework" \
-        -archive "$BUILD_DIR/$SCHEME-Simulator.xcarchive" -framework "$SCHEME.framework" \
-        -output "$BUILD_DIR/$SCHEME.xcframework"
+        -framework "$IOS_FW" \
+        -framework "$SIM_FW" \
+        -output "$OUTPUT_DIR/${SCHEME}.xcframework"
 
-    echo "$SCHEME.xcframework created successfully"
+    echo "  ${SCHEME}.xcframework created"
 done
 
 echo ""
 echo "================================================"
-echo "XCFrameworks built successfully!"
-echo "Output directory: $BUILD_DIR"
+echo "All XCFrameworks built successfully!"
+ls -lh "$OUTPUT_DIR"/*.xcframework
 echo "================================================"
-
-ls -lh "$BUILD_DIR"/*.xcframework

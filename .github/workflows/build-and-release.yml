@@ -4,14 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build (e.g., v16.1.0)'
+        description: 'Socket.IO version tag to build (e.g. v16.1.0)'
         required: true
         default: 'v16.1.0'
-      create_tag:
-        description: 'Create git tag for this version'
-        required: false
-        default: true
-        type: boolean
 
 env:
   PREFIX: SCX
@@ -20,245 +15,246 @@ env:
 
 jobs:
   build:
-    name: Build Prefixed Framework
-    runs-on: macos-14
+    name: Build Prefixed XCFrameworks
+    runs-on: macos-15
 
     steps:
+    # ── Setup ────────────────────────────────────────────────────────────
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         ref: main
         fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
       with:
         xcode-version: latest-stable
 
-    - name: Install dependencies
-      run: |
-        brew install gnu-sed rename
-
-    - name: Set version variable
+    - name: Set version
       run: |
         VERSION="${{ github.event.inputs.version }}"
         echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "Building version: $VERSION"
+        echo "Building Socket.IO $VERSION with prefix $PREFIX"
 
-    - name: Clone Socket.IO and dependencies
+    # ── Clone sources ────────────────────────────────────────────────────
+    - name: Clone Socket.IO
       run: |
-        echo "Cloning Socket.IO version: $VERSION"
+        git clone --depth 1 --branch "$VERSION" "$SOCKETIO_REPO" socketio-source
+        echo "Socket.IO cloned at $VERSION"
 
-        # Clone Socket.IO client
-        git clone --depth 1 --branch $VERSION $SOCKETIO_REPO socketio-source
+    - name: Clone Starscream (dependency)
+      run: |
+        # Extract Starscream version from Socket.IO's Package.swift
+        STAR_VER=$(grep -A5 'Starscream' socketio-source/Package.swift \
+          | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        echo "Detected Starscream version requirement: ${STAR_VER:-not found}"
+        STAR_VER="${STAR_VER:-4.0.8}"
 
-        # Clone Starscream (dependency)
-        cd socketio-source
-        STARSCREAM_VERSION=$(grep -A 2 'url.*Starscream' Package.swift | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
-        cd ..
+        git clone --depth 1 --branch "$STAR_VER" "$STARSCREAM_REPO" starscream-source \
+          || git clone --depth 1 "$STARSCREAM_REPO" starscream-source
 
-        if [ -z "$STARSCREAM_VERSION" ]; then
-          STARSCREAM_VERSION="4.0.8"
-        fi
+        echo "STARSCREAM_VERSION=$STAR_VER" >> $GITHUB_ENV
+        echo "Starscream cloned at $STAR_VER"
 
-        git clone --depth 1 --branch $STARSCREAM_VERSION $STARSCREAM_REPO starscream-source || \
-        git clone --depth 1 $STARSCREAM_REPO starscream-source
-
+    # ── Prefix symbols ──────────────────────────────────────────────────
     - name: Prefix Starscream symbols
-      run: |
-        echo "=== Starscream has multi-module structure ==="
-        echo "Listing all Swift files in Sources/:"
-        find starscream-source/Sources -name "*.swift" -type f | sort
-        echo "Total files: $(find starscream-source/Sources -name "*.swift" -type f | wc -l)"
-
-        # Prefix ALL sources at once (not module by module)
-        # This ensures symbols can reference each other across modules
-        echo ""
-        echo "Prefixing all Starscream symbols together..."
-        ./scripts/prefix-symbols.sh starscream-source Sources Starscream $PREFIX
-
-        echo ""
-        echo "=== After prefixing ==="
-        echo "Verifying files still exist:"
-        find starscream-source/Sources -name "*.swift" -type f | wc -l
-
-        # Update Starscream Package.swift
-        cd starscream-source
-        gsed -i "s/name: \"Starscream\"/name: \"${PREFIX}Starscream\"/g" Package.swift
-        gsed -i "s/\"Starscream\"/\"${PREFIX}Starscream\"/g" Package.swift
-        cd ..
+      run: python3 scripts/prefix-symbols.py starscream-source/Sources "$PREFIX"
 
     - name: Prefix Socket.IO symbols
+      run: python3 scripts/prefix-symbols.py socketio-source/Source/SocketIO "$PREFIX"
+
+    - name: Update cross-module imports
       run: |
-        echo "=== Before prefixing Socket.IO ==="
-        find socketio-source/Source/SocketIO -name "*.swift" -type f | sort
-        echo "Total files: $(find socketio-source/Source/SocketIO -name "*.swift" -type f | wc -l)"
+        find socketio-source/Source/SocketIO -name '*.swift' -exec \
+          sed -i '' "s/import Starscream/import ${PREFIX}Starscream/g" {} +
+        echo "Cross-module imports updated"
 
-        ./scripts/prefix-symbols.sh socketio-source Source/SocketIO SocketIO $PREFIX
-
-        echo ""
-        echo "=== After prefixing Socket.IO ==="
-        find socketio-source/Source/SocketIO -name "*.swift" -type f | sort
-        echo "Total files: $(find socketio-source/Source/SocketIO -name "*.swift" -type f | wc -l)"
-
-        # Update Socket.IO Package.swift to use prefixed Starscream
-        cd socketio-source
-        gsed -i "s/name: \"SocketIO\"/name: \"${PREFIX}SocketIO\"/g" Package.swift
-        gsed -i "s/\"SocketIO\"/\"${PREFIX}SocketIO\"/g" Package.swift
-
-        # Update import statements in all Swift files
-        find Source/SocketIO -name "*.swift" -type f -exec gsed -i "s/import Starscream/import ${PREFIX}Starscream/g" {} \;
-        cd ..
-
-    - name: Prepare build directory
+    # ── Prepare build package ────────────────────────────────────────────
+    - name: Assemble build package
       run: |
-        # Create a temporary Package.swift for building
-        mkdir -p build-temp
-        cd build-temp
+        mkdir -p build-pkg/Sources/${PREFIX}Starscream
+        mkdir -p build-pkg/Sources/${PREFIX}SocketIO
 
-        # Copy Package.swift structure
-        cat > Package.swift << 'EOF'
+        # Copy ALL Starscream submodules into a flat target directory
+        for dir in starscream-source/Sources/*/; do
+          cp -R "$dir"/* "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
+        done
+        # Also copy any top-level Swift files in Sources/
+        cp starscream-source/Sources/*.swift "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
+
+        # Copy Socket.IO sources
+        cp -R socketio-source/Source/SocketIO/* "build-pkg/Sources/${PREFIX}SocketIO/"
+
+        # Copy PrivacyInfo.xcprivacy into both targets
+        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/${PREFIX}Starscream/"
+        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/${PREFIX}SocketIO/"
+
+        echo "Starscream Swift files: $(find build-pkg/Sources/${PREFIX}Starscream -name '*.swift' | wc -l)"
+        echo "SocketIO Swift files:   $(find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' | wc -l)"
+
+    - name: Generate build Package.swift
+      run: |
+        cat > build-pkg/Package.swift << 'EOF'
         // swift-tools-version: 5.9
         import PackageDescription
 
+        let prefix = "SCX"
+
         let package = Package(
-            name: "SCXSocketIO",
-            platforms: [.iOS(.v13), .macOS(.v10_15), .tvOS(.v13), .watchOS(.v6)],
+            name: "\(prefix)SocketIO",
+            platforms: [
+                .iOS(.v13),
+                .macOS(.v10_15),
+                .tvOS(.v13),
+                .watchOS(.v6)
+            ],
             products: [
-                .library(name: "SCXSocketIO", type: .dynamic, targets: ["SCXSocketIO"]),
-                .library(name: "SCXStarscream", type: .dynamic, targets: ["SCXStarscream"])
+                .library(name: "\(prefix)Starscream", targets: ["\(prefix)Starscream"]),
+                .library(name: "\(prefix)SocketIO",   targets: ["\(prefix)SocketIO"]),
             ],
             targets: [
-                .target(name: "SCXStarscream", path: "Sources/SCXStarscream"),
-                .target(name: "SCXSocketIO", dependencies: ["SCXStarscream"], path: "Sources/SCXSocketIO")
+                .target(
+                    name: "\(prefix)Starscream",
+                    path: "Sources/\(prefix)Starscream",
+                    resources: [.copy("PrivacyInfo.xcprivacy")]
+                ),
+                .target(
+                    name: "\(prefix)SocketIO",
+                    dependencies: [.target(name: "\(prefix)Starscream")],
+                    path: "Sources/\(prefix)SocketIO",
+                    resources: [.copy("PrivacyInfo.xcprivacy")]
+                ),
             ]
         )
         EOF
 
-        # Copy prefixed sources
-        mkdir -p Sources/SCXStarscream
-        mkdir -p Sources/SCXSocketIO
+        echo "Generated Package.swift:"
+        cat build-pkg/Package.swift
 
-        echo "=== Copying ALL Starscream modules ==="
-        echo "Source structure:"
-        ls -la ../starscream-source/Sources/
+    - name: Resolve & verify package
+      run: |
+        cd build-pkg
+        swift package resolve
+        swift package dump-package
+        echo "Package resolves successfully"
 
-        # Copy ALL subdirectories from Sources/, not just Starscream/
-        echo ""
-        echo "Copying all modules to SCXStarscream..."
-        for dir in ../starscream-source/Sources/*/; do
-          dirname=$(basename "$dir")
-          echo "Copying module: $dirname"
-          cp -rv "$dir"* Sources/SCXStarscream/
-        done
-
-        echo ""
-        echo "Copied to build-temp/Sources/SCXStarscream/:"
-        find Sources/SCXStarscream -name "*.swift" -type f | sort
-        echo "Total Swift files: $(find Sources/SCXStarscream -name "*.swift" -type f | wc -l)"
-
-        echo ""
-        echo "=== Copying SocketIO files ==="
-        cp -rv ../socketio-source/Source/SocketIO/* Sources/SCXSocketIO/
-
-        echo ""
-        echo "Copied to build-temp/Sources/SCXSocketIO/:"
-        find Sources/SCXSocketIO -name "*.swift" -type f | sort
-        echo "Total Swift files: $(find Sources/SCXSocketIO -name "*.swift" -type f | wc -l)"
-
-        # Copy privacy manifest
-        mkdir -p Sources/SCXSocketIO/Resources
-        cp ../Resources/PrivacyInfo.xcprivacy Sources/SCXSocketIO/Resources/
-
-        echo ""
-        echo "=== Final build-temp structure ==="
-        ls -R Sources/
-
+    # ── Build XCFrameworks ───────────────────────────────────────────────
     - name: Build XCFrameworks
       run: |
-        cd build-temp
+        SCHEMES=("${PREFIX}Starscream" "${PREFIX}SocketIO")
+        ARCHIVE_DIR="$(pwd)/build/archives"
+        OUTPUT_DIR="$(pwd)/build/output"
+        mkdir -p "$ARCHIVE_DIR" "$OUTPUT_DIR"
 
-        # Build for iOS
-        echo "Building for iOS..."
-        xcodebuild archive \
-          -scheme SCXStarscream \
-          -destination "generic/platform=iOS" \
-          -archivePath "../build/SCXStarscream-iOS" \
-          SKIP_INSTALL=NO \
-          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+        cd build-pkg
 
-        xcodebuild archive \
-          -scheme SCXStarscream \
-          -destination "generic/platform=iOS Simulator" \
-          -archivePath "../build/SCXStarscream-Simulator" \
-          SKIP_INSTALL=NO \
-          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+        for SCHEME in "${SCHEMES[@]}"; do
+          echo ""
+          echo "=========================================="
+          echo "Building $SCHEME"
+          echo "=========================================="
 
-        # Create XCFramework for Starscream
-        xcodebuild -create-xcframework \
-          -archive ../build/SCXStarscream-iOS.xcarchive -framework SCXStarscream.framework \
-          -archive ../build/SCXStarscream-Simulator.xcarchive -framework SCXStarscream.framework \
-          -output ../build/SCXStarscream.xcframework
+          IOS_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-iOS.xcarchive"
+          SIM_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-Simulator.xcarchive"
 
-        # Build SocketIO
-        echo "Building SCXSocketIO..."
-        xcodebuild archive \
-          -scheme SCXSocketIO \
-          -destination "generic/platform=iOS" \
-          -archivePath "../build/SCXSocketIO-iOS" \
-          SKIP_INSTALL=NO \
-          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+          # iOS device
+          echo "Archiving for iOS device..."
+          xcodebuild archive \
+            -scheme "$SCHEME" \
+            -destination "generic/platform=iOS" \
+            -archivePath "$IOS_ARCHIVE" \
+            -configuration Release \
+            -skipPackagePluginValidation \
+            SKIP_INSTALL=NO \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            ONLY_ACTIVE_ARCH=NO
 
-        xcodebuild archive \
-          -scheme SCXSocketIO \
-          -destination "generic/platform=iOS Simulator" \
-          -archivePath "../build/SCXSocketIO-Simulator" \
-          SKIP_INSTALL=NO \
-          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+          # iOS Simulator
+          echo "Archiving for iOS Simulator..."
+          xcodebuild archive \
+            -scheme "$SCHEME" \
+            -destination "generic/platform=iOS Simulator" \
+            -archivePath "$SIM_ARCHIVE" \
+            -configuration Release \
+            -skipPackagePluginValidation \
+            SKIP_INSTALL=NO \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            ONLY_ACTIVE_ARCH=NO
 
-        # Create XCFramework for SocketIO
-        xcodebuild -create-xcframework \
-          -archive ../build/SCXSocketIO-iOS.xcarchive -framework SCXSocketIO.framework \
-          -archive ../build/SCXSocketIO-Simulator.xcarchive -framework SCXSocketIO.framework \
-          -output ../build/SCXSocketIO.xcframework
+          # Locate the .framework inside each archive
+          IOS_FW=$(find "$IOS_ARCHIVE/Products" -name "${SCHEME}.framework" -type d | head -1)
+          SIM_FW=$(find "$SIM_ARCHIVE/Products" -name "${SCHEME}.framework" -type d | head -1)
 
-        echo "XCFrameworks created successfully"
-        ls -lh ../build/*.xcframework
+          if [ -z "$IOS_FW" ] || [ -z "$SIM_FW" ]; then
+            echo "ERROR: framework not found in archives for $SCHEME"
+            echo "iOS archive contents:"
+            find "$IOS_ARCHIVE" -name "*.framework" -type d 2>/dev/null
+            echo "Sim archive contents:"
+            find "$SIM_ARCHIVE" -name "*.framework" -type d 2>/dev/null
+            exit 1
+          fi
 
-    - name: Package XCFrameworks
-      run: |
-        # Zip each XCFramework separately
-        cd build
+          echo "iOS framework:  $IOS_FW"
+          echo "Sim framework:  $SIM_FW"
 
-        # Zip SCXStarscream
-        zip -r SCXStarscream.xcframework.zip SCXStarscream.xcframework
-        STARSCREAM_CHECKSUM=$(shasum -a 256 SCXStarscream.xcframework.zip | awk '{print $1}')
+          # Create XCFramework
+          xcodebuild -create-xcframework \
+            -framework "$IOS_FW" \
+            -framework "$SIM_FW" \
+            -output "$OUTPUT_DIR/${SCHEME}.xcframework"
 
-        # Zip SCXSocketIO
-        zip -r SCXSocketIO.xcframework.zip SCXSocketIO.xcframework
-        SOCKETIO_CHECKSUM=$(shasum -a 256 SCXSocketIO.xcframework.zip | awk '{print $1}')
+          echo "$SCHEME.xcframework created successfully"
+        done
 
         cd ..
+        echo ""
+        echo "=========================================="
+        echo "All XCFrameworks built"
+        echo "=========================================="
+        ls -lh "$OUTPUT_DIR"/*.xcframework
 
-        # Save checksums to env
-        echo "STARSCREAM_CHECKSUM=$STARSCREAM_CHECKSUM" >> $GITHUB_ENV
-        echo "SOCKETIO_CHECKSUM=$SOCKETIO_CHECKSUM" >> $GITHUB_ENV
-
-        echo "Starscream Checksum: $STARSCREAM_CHECKSUM"
-        echo "SocketIO Checksum: $SOCKETIO_CHECKSUM"
-
-    - name: Generate checksums file
+    # ── Verify PrivacyInfo is embedded ───────────────────────────────────
+    - name: Verify PrivacyInfo.xcprivacy
       run: |
-        cat > checksums.txt << EOF
-        ${{ env.STARSCREAM_CHECKSUM }}  SCXStarscream.xcframework.zip
-        ${{ env.SOCKETIO_CHECKSUM }}  SCXSocketIO.xcframework.zip
-        EOF
-        cat checksums.txt
+        for FW in build/output/*.xcframework; do
+          NAME=$(basename "$FW")
+          FOUND=$(find "$FW" -name "PrivacyInfo.xcprivacy" | head -1)
+          if [ -n "$FOUND" ]; then
+            echo "OK: $NAME contains PrivacyInfo.xcprivacy"
+          else
+            echo "WARNING: $NAME does NOT contain PrivacyInfo.xcprivacy"
+          fi
+        done
 
+    # ── Package & checksum ───────────────────────────────────────────────
+    - name: Package XCFrameworks
+      run: |
+        cd build/output
+
+        for FW in *.xcframework; do
+          ZIPNAME="${FW%.xcframework}.xcframework.zip"
+          zip -r -y "$ZIPNAME" "$FW"
+          echo "Created $ZIPNAME ($(du -h "$ZIPNAME" | cut -f1))"
+        done
+
+        shasum -a 256 *.zip | tee checksums.txt
+
+        STAR_CS=$(grep "${PREFIX}Starscream" checksums.txt | awk '{print $1}')
+        SIO_CS=$(grep "${PREFIX}SocketIO" checksums.txt | awk '{print $1}')
+        echo "STARSCREAM_CHECKSUM=$STAR_CS" >> $GITHUB_ENV
+        echo "SOCKETIO_CHECKSUM=$SIO_CS" >> $GITHUB_ENV
+
+    # ── Update Package.swift for consumers ───────────────────────────────
     - name: Update Package.swift with binary targets
       run: |
-        # Create updated Package.swift with binary targets
-        cat > Package.swift << 'EOF'
+        REPO="${{ github.repository }}"
+        VER="${{ env.VERSION }}"
+        STAR_CS="${{ env.STARSCREAM_CHECKSUM }}"
+        SIO_CS="${{ env.SOCKETIO_CHECKSUM }}"
+
+        cat > Package.swift << PKGEOF
         // swift-tools-version: 5.9
         import PackageDescription
 
@@ -271,87 +267,72 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "SCXSocketIO", targets: ["SCXSocketIO"]),
-                .library(name: "SCXStarscream", targets: ["SCXStarscream"])
+                .library(name: "SCXSocketIO",   targets: ["SCXSocketIO"]),
+                .library(name: "SCXStarscream", targets: ["SCXStarscream"]),
             ],
             targets: [
                 .binaryTarget(
                     name: "SCXStarscream",
-                    url: "https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/SCXStarscream.xcframework.zip",
-                    checksum: "${{ env.STARSCREAM_CHECKSUM }}"
+                    url: "https://github.com/${REPO}/releases/download/${VER}/SCXStarscream.xcframework.zip",
+                    checksum: "${STAR_CS}"
                 ),
                 .binaryTarget(
                     name: "SCXSocketIO",
-                    url: "https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/SCXSocketIO.xcframework.zip",
-                    checksum: "${{ env.SOCKETIO_CHECKSUM }}"
-                )
+                    url: "https://github.com/${REPO}/releases/download/${VER}/SCXSocketIO.xcframework.zip",
+                    checksum: "${SIO_CS}"
+                ),
             ]
         )
-        EOF
+        PKGEOF
 
-        git config user.name "GitHub Actions Bot"
-        git config user.email "actions@github.com"
-        git add Package.swift
-        git commit -m "chore: Update Package.swift with binary targets for ${{ env.VERSION }}"
-        git push origin HEAD:main
+        echo "Updated Package.swift:"
+        cat Package.swift
 
-    - name: Create and push tag
+    - name: Commit updated Package.swift
       run: |
-        VERSION="${{ env.VERSION }}"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add Package.swift
+        git commit -m "chore: update Package.swift binary targets for $VERSION" || echo "No changes to commit"
+        git push origin main
 
-        # Check if tag already exists
-        if git rev-parse "$VERSION" >/dev/null 2>&1; then
-          echo "Tag $VERSION already exists, deleting it..."
-          git tag -d "$VERSION"
-          git push origin ":refs/tags/$VERSION" || true
-        fi
+    # ── Tag & Release ────────────────────────────────────────────────────
+    - name: Create tag
+      run: |
+        # Delete existing tag if present
+        git tag -d "$VERSION" 2>/dev/null || true
+        git push origin ":refs/tags/$VERSION" 2>/dev/null || true
 
-        # Create and push new tag
-        git tag -a "$VERSION" -m "Release $VERSION"
+        git tag -a "$VERSION" -m "Release $VERSION - Prefixed Socket.IO XCFrameworks"
         git push origin "$VERSION"
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ env.VERSION }}
-        name: ${{ env.VERSION }}
+        name: SCXSocketIO ${{ env.VERSION }}
         body: |
           ## SCXSocketIO ${{ env.VERSION }}
 
-          Prefixed build of Socket.IO Client Swift with 'SCX' prefix to avoid symbol conflicts.
-          **Pre-compiled XCFramework binaries** for fast SPM integration.
+          Pre-compiled **Socket.IO Client Swift** with `SCX` prefix on all symbols to avoid duplicate-symbol conflicts.
 
-          ### ✨ Features
-          - ✅ All Socket.IO classes prefixed with SCX
-          - ✅ All Starscream classes prefixed with SCX
-          - ✅ Privacy manifest included
-          - ✅ Pre-compiled XCFrameworks (fast builds)
-          - ✅ SPM binary target support
-          - ✅ iOS 13+, macOS 10.15+, tvOS 13+, watchOS 6+
+          Based on [socket.io-client-swift](https://github.com/socketio/socket.io-client-swift) `${{ env.VERSION }}` + Starscream `${{ env.STARSCREAM_VERSION }}`.
 
-          ### 📦 Installation
+          ### Installation (SPM)
 
-          #### Swift Package Manager (Recommended)
-          Add to your `Package.swift`:
-          ```swift
-          dependencies: [
-              .package(url: "https://github.com/${{ github.repository }}", from: "${{ env.VERSION }}")
-          ]
+          In Xcode: **File > Add Package Dependencies** and enter:
           ```
+          https://github.com/${{ github.repository }}
+          ```
+          Select version **${{ env.VERSION }}**.
 
-          Or in Xcode:
-          1. **File → Add Package Dependencies**
-          2. Enter: `https://github.com/${{ github.repository }}`
-          3. Select version **${{ env.VERSION }}** and add to your target
+          Or in `Package.swift`:
+          ```swift
+          .package(url: "https://github.com/${{ github.repository }}", exact: "${{ env.VERSION }}")
+          ```
+          Then depend on `"SCXSocketIO"` and/or `"SCXStarscream"`.
 
-          SPM will automatically download the pre-compiled XCFrameworks!
-
-          #### Manual Installation
-          Download the XCFramework files below and add them to your project:
-          - `SCXStarscream.xcframework.zip`
-          - `SCXSocketIO.xcframework.zip`
-
-          ### 🚀 Usage
+          ### Usage
           ```swift
           import SCXSocketIO
 
@@ -361,37 +342,24 @@ jobs:
           socket.on(clientEvent: .connect) { data, ack in
               print("Connected!")
           }
-
           socket.connect()
           ```
 
-          ### 📋 What's in this Release
+          ### Checksums
+          | Artifact | SHA-256 |
+          |----------|---------|
+          | SCXStarscream.xcframework.zip | `${{ env.STARSCREAM_CHECKSUM }}` |
+          | SCXSocketIO.xcframework.zip   | `${{ env.SOCKETIO_CHECKSUM }}`   |
 
-          | File | Size | Checksum |
-          |------|------|----------|
-          | SCXStarscream.xcframework.zip | - | `${{ env.STARSCREAM_CHECKSUM }}` |
-          | SCXSocketIO.xcframework.zip | - | `${{ env.SOCKETIO_CHECKSUM }}` |
-
-          ### 📚 Documentation
-          - [Quick Start Guide](https://github.com/${{ github.repository }}/blob/main/QUICKSTART.md)
-          - [Full Usage Documentation](https://github.com/${{ github.repository }}/blob/main/USAGE.md)
-          - [Contributing Guide](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md)
-
-          ### ⚡ Why Pre-compiled Binaries?
-          - **Faster builds** - No need to compile Socket.IO on every clean build
-          - **Consistent** - Same binary for all users
-          - **Tested** - Built and tested in CI/CD
-
-          ---
-
-          **Full Checksums:**
-          ```
-          $(cat checksums.txt)
-          ```
+          ### What's included
+          - All public types prefixed with `SCX`
+          - PrivacyInfo.xcprivacy embedded in both frameworks
+          - iOS device + Simulator (arm64, x86_64)
+          - Built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES`
         files: |
-          build/SCXStarscream.xcframework.zip
-          build/SCXSocketIO.xcframework.zip
-          checksums.txt
+          build/output/SCXStarscream.xcframework.zip
+          build/output/SCXSocketIO.xcframework.zip
+          build/output/checksums.txt
         draft: false
         prerelease: false
       env:
