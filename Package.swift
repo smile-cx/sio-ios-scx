@@ -17,12 +17,12 @@ let package = Package(
         .binaryTarget(
             name: "SCXStarscream",
             url: "https://github.com/smile-cx/sio-ios-scx/releases/download/v15.2.0/SCXStarscream.xcframework.zip",
-            checksum: "6b8960167aa8039d21ca2d6728bbc873331aacedd58726efbacd6d9a3b12f46f"
+            checksum: "c137025319151f986ea77938d20b93988e8d0fb78535ddebf829d48fcf2a7aba"
         ),
         .binaryTarget(
             name: "SCXSocketIO",
             url: "https://github.com/smile-cx/sio-ios-scx/releases/download/v15.2.0/SCXSocketIO.xcframework.zip",
-            checksum: "25f9ffd5a610877cb0ed3d8948c1fe7339d4f5151eef0a00e698bc9e6aee4e7d"
+            checksum: "62cc758131b8e71173faac62e10a5f007d87202098a13810e0dac6c559e9f605"
         ),
     ]
 )
