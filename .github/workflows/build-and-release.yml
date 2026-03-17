@@ -66,7 +66,16 @@ jobs:
 
     - name: Prefix Starscream symbols
       run: |
+        echo "=== Before prefixing Starscream ==="
+        find starscream-source/Sources/Starscream -name "*.swift" -type f | sort
+        echo "Total files: $(find starscream-source/Sources/Starscream -name "*.swift" -type f | wc -l)"
+
         ./scripts/prefix-symbols.sh starscream-source Sources/Starscream Starscream $PREFIX
+
+        echo ""
+        echo "=== After prefixing Starscream ==="
+        find starscream-source/Sources/Starscream -name "*.swift" -type f | sort
+        echo "Total files: $(find starscream-source/Sources/Starscream -name "*.swift" -type f | wc -l)"
 
         # Update Starscream Package.swift
         cd starscream-source
@@ -76,7 +85,16 @@ jobs:
 
     - name: Prefix Socket.IO symbols
       run: |
+        echo "=== Before prefixing Socket.IO ==="
+        find socketio-source/Source/SocketIO -name "*.swift" -type f | sort
+        echo "Total files: $(find socketio-source/Source/SocketIO -name "*.swift" -type f | wc -l)"
+
         ./scripts/prefix-symbols.sh socketio-source Source/SocketIO SocketIO $PREFIX
+
+        echo ""
+        echo "=== After prefixing Socket.IO ==="
+        find socketio-source/Source/SocketIO -name "*.swift" -type f | sort
+        echo "Total files: $(find socketio-source/Source/SocketIO -name "*.swift" -type f | wc -l)"
 
         # Update Socket.IO Package.swift to use prefixed Starscream
         cd socketio-source
@@ -86,14 +104,6 @@ jobs:
         # Update import statements in all Swift files
         find Source/SocketIO -name "*.swift" -type f -exec gsed -i "s/import Starscream/import ${PREFIX}Starscream/g" {} \;
         cd ..
-
-    - name: Debug - Check source directories
-      run: |
-        echo "=== Starscream source structure ==="
-        find starscream-source/Sources -type f -name "*.swift" | head -20
-        echo ""
-        echo "=== SocketIO source structure ==="
-        find socketio-source/Source -type f -name "*.swift" | head -20
 
     - name: Prepare build directory
       run: |
@@ -124,14 +134,32 @@ jobs:
         mkdir -p Sources/SCXStarscream
         mkdir -p Sources/SCXSocketIO
 
-        cp -r ../starscream-source/Sources/Starscream/* Sources/SCXStarscream/
-        cp -r ../socketio-source/Source/SocketIO/* Sources/SCXSocketIO/
+        echo "=== Copying Starscream files ==="
+        echo "Source directory contents:"
+        ls -la ../starscream-source/Sources/Starscream/
+
+        cp -rv ../starscream-source/Sources/Starscream/* Sources/SCXStarscream/
+
+        echo ""
+        echo "Copied to build-temp/Sources/SCXStarscream/:"
+        find Sources/SCXStarscream -name "*.swift" -type f | sort
+        echo "Total Swift files: $(find Sources/SCXStarscream -name "*.swift" -type f | wc -l)"
+
+        echo ""
+        echo "=== Copying SocketIO files ==="
+        cp -rv ../socketio-source/Source/SocketIO/* Sources/SCXSocketIO/
+
+        echo ""
+        echo "Copied to build-temp/Sources/SCXSocketIO/:"
+        find Sources/SCXSocketIO -name "*.swift" -type f | sort
+        echo "Total Swift files: $(find Sources/SCXSocketIO -name "*.swift" -type f | wc -l)"
 
         # Copy privacy manifest
         mkdir -p Sources/SCXSocketIO/Resources
         cp ../Resources/PrivacyInfo.xcprivacy Sources/SCXSocketIO/Resources/
 
-        echo "Build directory prepared"
+        echo ""
+        echo "=== Final build-temp structure ==="
         ls -R Sources/
 
     - name: Build XCFrameworks

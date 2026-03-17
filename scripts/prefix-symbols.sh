@@ -38,6 +38,10 @@ fi
 
 echo "Found $(echo "$SWIFT_FILES" | wc -l) Swift files"
 
+# Clean any existing backup files
+echo "Cleaning existing backup files..."
+find "$FULL_SOURCE_PATH" -name "*.swift.backup" -type f -delete
+
 # Extract all symbol names first
 echo "Extracting symbols..."
 SYMBOLS_FILE=$(mktemp)
@@ -105,12 +109,27 @@ for file in $SWIFT_FILES; do
     done < "$SYMBOLS_FILE"
 done
 
-# Clean up backups if everything went well
+# Clean up backups and verify files
+echo ""
+echo "Verifying processed files..."
+EMPTY_FILES=0
 for file in $SWIFT_FILES; do
+    # Remove backup
     if [ -f "$file.backup" ]; then
         rm "$file.backup"
     fi
+
+    # Check if file is empty
+    if [ ! -s "$file" ]; then
+        echo "WARNING: File is empty: $file"
+        EMPTY_FILES=$((EMPTY_FILES + 1))
+    fi
 done
+
+if [ $EMPTY_FILES -gt 0 ]; then
+    echo "ERROR: $EMPTY_FILES files are empty after processing!"
+    exit 1
+fi
 
 rm "$SYMBOLS_FILE"
 
@@ -118,4 +137,5 @@ echo ""
 echo "================================================"
 echo "Prefixing complete!"
 echo "All symbols prefixed with: $PREFIX"
+echo "Processed $(echo "$SWIFT_FILES" | wc -l) files successfully"
 echo "================================================"
