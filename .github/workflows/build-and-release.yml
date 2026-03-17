@@ -72,41 +72,69 @@ jobs:
         cd socketio-source
         gsed -i "s/name: \"SocketIO\"/name: \"${PREFIX}SocketIO\"/g" Package.swift
         gsed -i "s/\"SocketIO\"/\"${PREFIX}SocketIO\"/g" Package.swift
-        gsed -i "s/import Starscream/import ${PREFIX}Starscream/g" Source/SocketIO/**/*.swift
+
+        # Update import statements in all Swift files
+        find Source/SocketIO -name "*.swift" -type f -exec gsed -i "s/import Starscream/import ${PREFIX}Starscream/g" {} \;
         cd ..
+
+    - name: Debug - Check source directories
+      run: |
+        echo "=== Starscream source structure ==="
+        find starscream-source/Sources -type f -name "*.swift" | head -20
+        echo ""
+        echo "=== SocketIO source structure ==="
+        find socketio-source/Source -type f -name "*.swift" | head -20
 
     - name: Copy prefixed sources to main repo
       run: |
-        mkdir -p Sources/${PREFIX}SocketIO
-        mkdir -p Sources/${PREFIX}Starscream
+        # Copy Starscream preserving directory structure
+        echo "Copying Starscream sources..."
+        rm -rf Sources/${PREFIX}Starscream
+        cp -R starscream-source/Sources/Starscream Sources/${PREFIX}Starscream
 
-        cp -r starscream-source/Sources/Starscream/* Sources/${PREFIX}Starscream/
-        cp -r socketio-source/Source/SocketIO/* Sources/${PREFIX}SocketIO/
+        echo "Starscream files copied:"
+        find Sources/${PREFIX}Starscream -name "*.swift" -type f
+        echo "Total: $(find Sources/${PREFIX}Starscream -name "*.swift" -type f | wc -l) Swift files"
+
+        # Copy SocketIO preserving directory structure
+        echo "Copying SocketIO sources..."
+        rm -rf Sources/${PREFIX}SocketIO
+        cp -R socketio-source/Source/SocketIO Sources/${PREFIX}SocketIO
+
+        echo "SocketIO files copied:"
+        find Sources/${PREFIX}SocketIO -name "*.swift" -type f
+        echo "Total: $(find Sources/${PREFIX}SocketIO -name "*.swift" -type f | wc -l) Swift files"
 
         # Copy privacy manifest
         mkdir -p Sources/${PREFIX}SocketIO/Resources
         cp Resources/PrivacyInfo.xcprivacy Sources/${PREFIX}SocketIO/Resources/
 
-    - name: Build XCFramework for iOS
-      run: |
-        ./scripts/build-xcframework.sh
+        echo ""
+        echo "Final structure:"
+        ls -R Sources/
 
-    - name: Create distributable package
+    - name: Validate Package
+      run: |
+        swift package resolve
+        swift package dump-package
+        swift build --configuration release
+
+    - name: Create source distribution
       run: |
         VERSION="${{ github.event.inputs.version || github.ref_name }}"
-        ARCHIVE_NAME="${PREFIX}SocketIO-${VERSION}.zip"
+        ARCHIVE_NAME="${PREFIX}SocketIO-${VERSION}-source.zip"
 
-        # Create distribution directory
+        # Create distribution directory with all source files
         mkdir -p dist
 
-        # Copy XCFramework
-        cp -r build/*.xcframework dist/
-
-        # Copy SPM support files
+        # Copy SPM package structure
         cp Package.swift dist/
         cp -r Sources dist/
         cp -r Resources dist/
-        cp README.md dist/ 2>/dev/null || echo "# ${PREFIX}SocketIO" > dist/README.md
+        cp README.md dist/
+        cp LICENSE dist/
+        cp USAGE.md dist/ 2>/dev/null || true
+        cp QUICKSTART.md dist/ 2>/dev/null || true
 
         # Create archive
         cd dist
@@ -133,25 +161,44 @@ jobs:
 
           ### Installation
 
-          #### Swift Package Manager
+          #### Swift Package Manager (Recommended)
+          Add to your `Package.swift`:
           ```swift
           dependencies: [
               .package(url: "https://github.com/${{ github.repository }}", from: "${{ env.VERSION }}")
           ]
           ```
 
-          #### Manual Installation
-          Download and extract the XCFramework from the release assets.
+          Or in Xcode:
+          1. File → Add Package Dependencies
+          2. Enter: `https://github.com/${{ github.repository }}`
+          3. Select version and add to your target
 
-          ### Changes
-          - All Socket.IO classes prefixed with ${{ env.PREFIX }}
-          - All Starscream classes prefixed with ${{ env.PREFIX }}
-          - Privacy manifest included
+          #### Manual Installation
+          Download the source archive and integrate the `Sources/` directory into your project.
+
+          ### What's Included
+          - ✅ All Socket.IO classes prefixed with ${{ env.PREFIX }}
+          - ✅ All Starscream classes prefixed with ${{ env.PREFIX }}
+          - ✅ Privacy manifest included
+          - ✅ Full source code (no binaries)
+          - ✅ Ready for SPM integration
+
+          ### Usage
+          ```swift
+          import SCXSocketIO
+
+          let manager = SCXSocketManager(socketURL: URL(string: "https://example.com")!)
+          let socket = manager.defaultSocket
+          socket.connect()
+          ```
 
           ### Checksums
           ```
           $(cat checksums.txt)
           ```
+
+          For detailed usage instructions, see [USAGE.md](https://github.com/${{ github.repository }}/blob/${{ env.VERSION }}/USAGE.md)
         files: |
           ${{ env.ARCHIVE_NAME }}
           checksums.txt
@@ -159,9 +206,3 @@ jobs:
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Update Package.swift checksums
-      run: |
-        CHECKSUM=$(shasum -a 256 $ARCHIVE_NAME | awk '{print $1}')
-        echo "Checksum: $CHECKSUM"
-        echo "Update Package.swift with this checksum for binary target"
