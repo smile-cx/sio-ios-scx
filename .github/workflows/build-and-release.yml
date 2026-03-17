@@ -8,6 +8,9 @@ on:
         required: true
         default: 'v16.1.0'
 
+permissions:
+  contents: write
+
 env:
   PREFIX: SCX
   SOCKETIO_REPO: https://github.com/socketio/socket.io-client-swift.git
