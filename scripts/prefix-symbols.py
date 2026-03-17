@@ -78,6 +78,9 @@ SYSTEM_TYPES = frozenset([
     "Strideable", "Numeric", "SignedNumeric", "FloatingPoint",
     "BinaryInteger", "FixedWidthInteger", "UnsignedInteger", "SignedInteger",
     "StringProtocol", "TextOutputStream", "TextOutputStreamable",
+    # Associated types from Collection/Sequence protocols (used in where clauses)
+    "Element", "Index", "SubSequence", "Indices", "Iterator",
+    "Key", "Value",
 ])
 
 # Pattern to match type declarations
