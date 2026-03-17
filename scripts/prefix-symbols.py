@@ -120,15 +120,18 @@ def rename_symbols_in_content(content: str, rename_map: dict[str, str]) -> str:
 
     Sorts by length descending to avoid partial replacements
     (e.g., "SocketEngine" before "Socket").
+
+    Uses negative lookbehind (?<!\.) to avoid renaming symbols used as
+    member access on system types (e.g. Stream.Event, URLSessionWebSocketTask.CloseCode).
     """
     # Sort by length descending so longer names are replaced first
     sorted_names = sorted(rename_map.keys(), key=len, reverse=True)
 
     for old_name in sorted_names:
         new_name = rename_map[old_name]
-        # Use word boundary matching - \b ensures we match whole words only
-        # This avoids replacing "Socket" inside "SocketManager" when "Socket" is in the map
-        pattern = re.compile(r'\b' + re.escape(old_name) + r'\b')
+        # (?<!\.) prevents renaming after a dot (member access on system types)
+        # \b at the end ensures whole-word matching
+        pattern = re.compile(r'(?<!\.)\b' + re.escape(old_name) + r'\b')
         content = pattern.sub(new_name, content)
 
     return content
