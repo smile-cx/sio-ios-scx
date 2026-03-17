@@ -63,6 +63,7 @@ fastlane/test_output
 
 # Project specific
 build/
+build-temp/
 dist/
 DerivedData/
 test-build/
@@ -70,6 +71,11 @@ socketio-source/
 starscream-source/
 *.xcarchive
 *.backup
+*.xcframework
+*.xcframework.zip
+
+# Sources are generated during build, not committed
+Sources/
 
 # IDE
 .vscode/

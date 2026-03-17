@@ -21,44 +21,19 @@ let package = Package(
             targets: ["SCXStarscream"]
         )
     ],
-    dependencies: [
-        // No external dependencies - all code is prefixed and included
-    ],
+    dependencies: [],
     targets: [
-        .target(
+        // Binary targets will be updated by GitHub Actions during release
+        // These are placeholder targets - actual URLs and checksums are added during the release process
+        .binaryTarget(
             name: "SCXStarscream",
-            dependencies: [],
-            path: "Sources/SCXStarscream",
-            resources: [],
-            swiftSettings: [
-                .define("STARSCREAM_PREFIXED")
-            ]
+            url: "https://github.com/smile-cx/sio-ios-scx/releases/download/v16.1.0/SCXStarscream.xcframework.zip",
+            checksum: "PLACEHOLDER_CHECKSUM_WILL_BE_REPLACED_BY_GITHUB_ACTIONS"
         ),
-        .target(
+        .binaryTarget(
             name: "SCXSocketIO",
-            dependencies: ["SCXStarscream"],
-            path: "Sources/SCXSocketIO",
-            resources: [
-                .process("Resources/PrivacyInfo.xcprivacy")
-            ],
-            swiftSettings: [
-                .define("SOCKETIO_PREFIXED")
-            ]
-        ),
-
-        // Binary targets for pre-built XCFrameworks (optional, for faster builds)
-        // Uncomment and update URLs after first release
-        /*
-        .binaryTarget(
-            name: "SCXSocketIOBinary",
-            url: "https://github.com/YOUR_USERNAME/sio-ios-scx/releases/download/v16.1.0/SCXSocketIO-v16.1.0.zip",
-            checksum: "REPLACE_WITH_ACTUAL_CHECKSUM"
-        ),
-        .binaryTarget(
-            name: "SCXStarscreamBinary",
-            url: "https://github.com/YOUR_USERNAME/sio-ios-scx/releases/download/v16.1.0/SCXStarscream-v16.1.0.zip",
-            checksum: "REPLACE_WITH_ACTUAL_CHECKSUM"
+            url: "https://github.com/smile-cx/sio-ios-scx/releases/download/v16.1.0/SCXSocketIO.xcframework.zip",
+            checksum: "PLACEHOLDER_CHECKSUM_WILL_BE_REPLACED_BY_GITHUB_ACTIONS"
         )
-        */
     ]
 )

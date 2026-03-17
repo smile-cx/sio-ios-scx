@@ -1,15 +1,17 @@
 name: Build and Release Prefixed Socket.IO
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       version:
         description: 'Version to build (e.g., v16.1.0)'
         required: true
         default: 'v16.1.0'
+      create_tag:
+        description: 'Create git tag for this version'
+        required: false
+        default: true
+        type: boolean
 
 env:
   PREFIX: SCX
@@ -24,6 +26,9 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
 
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
@@ -34,10 +39,15 @@ jobs:
       run: |
         brew install gnu-sed rename
 
+    - name: Set version variable
+      run: |
+        VERSION="${{ github.event.inputs.version }}"
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "Building version: $VERSION"
+
     - name: Clone Socket.IO and dependencies
       run: |
-        VERSION="${{ github.event.inputs.version || github.ref_name }}"
-        echo "Building version: $VERSION"
+        echo "Cloning Socket.IO version: $VERSION"
 
         # Clone Socket.IO client
         git clone --depth 1 --branch $VERSION $SOCKETIO_REPO socketio-source
@@ -85,81 +95,201 @@ jobs:
         echo "=== SocketIO source structure ==="
         find socketio-source/Source -type f -name "*.swift" | head -20
 
-    - name: Copy prefixed sources to main repo
+    - name: Prepare build directory
       run: |
-        # Copy Starscream preserving directory structure
-        echo "Copying Starscream sources..."
-        rm -rf Sources/${PREFIX}Starscream
-        cp -R starscream-source/Sources/Starscream Sources/${PREFIX}Starscream
+        # Create a temporary Package.swift for building
+        mkdir -p build-temp
+        cd build-temp
 
-        echo "Starscream files copied:"
-        find Sources/${PREFIX}Starscream -name "*.swift" -type f
-        echo "Total: $(find Sources/${PREFIX}Starscream -name "*.swift" -type f | wc -l) Swift files"
+        # Copy Package.swift structure
+        cat > Package.swift << 'EOF'
+        // swift-tools-version: 5.9
+        import PackageDescription
 
-        # Copy SocketIO preserving directory structure
-        echo "Copying SocketIO sources..."
-        rm -rf Sources/${PREFIX}SocketIO
-        cp -R socketio-source/Source/SocketIO Sources/${PREFIX}SocketIO
+        let package = Package(
+            name: "SCXSocketIO",
+            platforms: [.iOS(.v13), .macOS(.v10_15), .tvOS(.v13), .watchOS(.v6)],
+            products: [
+                .library(name: "SCXSocketIO", type: .dynamic, targets: ["SCXSocketIO"]),
+                .library(name: "SCXStarscream", type: .dynamic, targets: ["SCXStarscream"])
+            ],
+            targets: [
+                .target(name: "SCXStarscream", path: "Sources/SCXStarscream"),
+                .target(name: "SCXSocketIO", dependencies: ["SCXStarscream"], path: "Sources/SCXSocketIO")
+            ]
+        )
+        EOF
 
-        echo "SocketIO files copied:"
-        find Sources/${PREFIX}SocketIO -name "*.swift" -type f
-        echo "Total: $(find Sources/${PREFIX}SocketIO -name "*.swift" -type f | wc -l) Swift files"
+        # Copy prefixed sources
+        mkdir -p Sources/SCXStarscream
+        mkdir -p Sources/SCXSocketIO
+
+        cp -r ../starscream-source/Sources/Starscream/* Sources/SCXStarscream/
+        cp -r ../socketio-source/Source/SocketIO/* Sources/SCXSocketIO/
 
         # Copy privacy manifest
-        mkdir -p Sources/${PREFIX}SocketIO/Resources
-        cp Resources/PrivacyInfo.xcprivacy Sources/${PREFIX}SocketIO/Resources/
+        mkdir -p Sources/SCXSocketIO/Resources
+        cp ../Resources/PrivacyInfo.xcprivacy Sources/SCXSocketIO/Resources/
 
-        echo ""
-        echo "Final structure:"
+        echo "Build directory prepared"
         ls -R Sources/
 
-    - name: Validate Package
+    - name: Build XCFrameworks
       run: |
-        swift package resolve
-        swift package dump-package
-        swift build --configuration release
+        cd build-temp
 
-    - name: Create source distribution
+        # Build for iOS
+        echo "Building for iOS..."
+        xcodebuild archive \
+          -scheme SCXStarscream \
+          -destination "generic/platform=iOS" \
+          -archivePath "../build/SCXStarscream-iOS" \
+          SKIP_INSTALL=NO \
+          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+
+        xcodebuild archive \
+          -scheme SCXStarscream \
+          -destination "generic/platform=iOS Simulator" \
+          -archivePath "../build/SCXStarscream-Simulator" \
+          SKIP_INSTALL=NO \
+          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+
+        # Create XCFramework for Starscream
+        xcodebuild -create-xcframework \
+          -archive ../build/SCXStarscream-iOS.xcarchive -framework SCXStarscream.framework \
+          -archive ../build/SCXStarscream-Simulator.xcarchive -framework SCXStarscream.framework \
+          -output ../build/SCXStarscream.xcframework
+
+        # Build SocketIO
+        echo "Building SCXSocketIO..."
+        xcodebuild archive \
+          -scheme SCXSocketIO \
+          -destination "generic/platform=iOS" \
+          -archivePath "../build/SCXSocketIO-iOS" \
+          SKIP_INSTALL=NO \
+          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+
+        xcodebuild archive \
+          -scheme SCXSocketIO \
+          -destination "generic/platform=iOS Simulator" \
+          -archivePath "../build/SCXSocketIO-Simulator" \
+          SKIP_INSTALL=NO \
+          BUILD_LIBRARY_FOR_DISTRIBUTION=YES
+
+        # Create XCFramework for SocketIO
+        xcodebuild -create-xcframework \
+          -archive ../build/SCXSocketIO-iOS.xcarchive -framework SCXSocketIO.framework \
+          -archive ../build/SCXSocketIO-Simulator.xcarchive -framework SCXSocketIO.framework \
+          -output ../build/SCXSocketIO.xcframework
+
+        echo "XCFrameworks created successfully"
+        ls -lh ../build/*.xcframework
+
+    - name: Package XCFrameworks
       run: |
-        VERSION="${{ github.event.inputs.version || github.ref_name }}"
-        ARCHIVE_NAME="${PREFIX}SocketIO-${VERSION}-source.zip"
+        # Zip each XCFramework separately
+        cd build
 
-        # Create distribution directory with all source files
-        mkdir -p dist
+        # Zip SCXStarscream
+        zip -r SCXStarscream.xcframework.zip SCXStarscream.xcframework
+        STARSCREAM_CHECKSUM=$(shasum -a 256 SCXStarscream.xcframework.zip | awk '{print $1}')
 
-        # Copy SPM package structure
-        cp Package.swift dist/
-        cp -r Sources dist/
-        cp -r Resources dist/
-        cp README.md dist/
-        cp LICENSE dist/
-        cp USAGE.md dist/ 2>/dev/null || true
-        cp QUICKSTART.md dist/ 2>/dev/null || true
+        # Zip SCXSocketIO
+        zip -r SCXSocketIO.xcframework.zip SCXSocketIO.xcframework
+        SOCKETIO_CHECKSUM=$(shasum -a 256 SCXSocketIO.xcframework.zip | awk '{print $1}')
 
-        # Create archive
-        cd dist
-        zip -r ../$ARCHIVE_NAME .
         cd ..
 
-        echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        # Save checksums to env
+        echo "STARSCREAM_CHECKSUM=$STARSCREAM_CHECKSUM" >> $GITHUB_ENV
+        echo "SOCKETIO_CHECKSUM=$SOCKETIO_CHECKSUM" >> $GITHUB_ENV
 
-    - name: Generate checksums
+        echo "Starscream Checksum: $STARSCREAM_CHECKSUM"
+        echo "SocketIO Checksum: $SOCKETIO_CHECKSUM"
+
+    - name: Generate checksums file
       run: |
-        shasum -a 256 $ARCHIVE_NAME > checksums.txt
+        cat > checksums.txt << EOF
+        ${{ env.STARSCREAM_CHECKSUM }}  SCXStarscream.xcframework.zip
+        ${{ env.SOCKETIO_CHECKSUM }}  SCXSocketIO.xcframework.zip
+        EOF
         cat checksums.txt
+
+    - name: Update Package.swift with binary targets
+      run: |
+        # Create updated Package.swift with binary targets
+        cat > Package.swift << 'EOF'
+        // swift-tools-version: 5.9
+        import PackageDescription
+
+        let package = Package(
+            name: "SCXSocketIO",
+            platforms: [
+                .iOS(.v13),
+                .macOS(.v10_15),
+                .tvOS(.v13),
+                .watchOS(.v6)
+            ],
+            products: [
+                .library(name: "SCXSocketIO", targets: ["SCXSocketIO"]),
+                .library(name: "SCXStarscream", targets: ["SCXStarscream"])
+            ],
+            targets: [
+                .binaryTarget(
+                    name: "SCXStarscream",
+                    url: "https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/SCXStarscream.xcframework.zip",
+                    checksum: "${{ env.STARSCREAM_CHECKSUM }}"
+                ),
+                .binaryTarget(
+                    name: "SCXSocketIO",
+                    url: "https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/SCXSocketIO.xcframework.zip",
+                    checksum: "${{ env.SOCKETIO_CHECKSUM }}"
+                )
+            ]
+        )
+        EOF
+
+        git config user.name "GitHub Actions Bot"
+        git config user.email "actions@github.com"
+        git add Package.swift
+        git commit -m "chore: Update Package.swift with binary targets for ${{ env.VERSION }}"
+        git push origin HEAD:main
+
+    - name: Create and push tag
+      run: |
+        VERSION="${{ env.VERSION }}"
+
+        # Check if tag already exists
+        if git rev-parse "$VERSION" >/dev/null 2>&1; then
+          echo "Tag $VERSION already exists, deleting it..."
+          git tag -d "$VERSION"
+          git push origin ":refs/tags/$VERSION" || true
+        fi
+
+        # Create and push new tag
+        git tag -a "$VERSION" -m "Release $VERSION"
+        git push origin "$VERSION"
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ env.VERSION }}
-        name: Release ${{ env.VERSION }}
+        name: ${{ env.VERSION }}
         body: |
-          ## ${PREFIX}SocketIO ${{ env.VERSION }}
+          ## SCXSocketIO ${{ env.VERSION }}
 
-          Prefixed build of Socket.IO Client Swift with '${{ env.PREFIX }}' prefix to avoid symbol conflicts.
+          Prefixed build of Socket.IO Client Swift with 'SCX' prefix to avoid symbol conflicts.
+          **Pre-compiled XCFramework binaries** for fast SPM integration.
 
-          ### Installation
+          ### ✨ Features
+          - ✅ All Socket.IO classes prefixed with SCX
+          - ✅ All Starscream classes prefixed with SCX
+          - ✅ Privacy manifest included
+          - ✅ Pre-compiled XCFrameworks (fast builds)
+          - ✅ SPM binary target support
+          - ✅ iOS 13+, macOS 10.15+, tvOS 13+, watchOS 6+
+
+          ### 📦 Installation
 
           #### Swift Package Manager (Recommended)
           Add to your `Package.swift`:
@@ -170,37 +300,57 @@ jobs:
           ```
 
           Or in Xcode:
-          1. File → Add Package Dependencies
+          1. **File → Add Package Dependencies**
           2. Enter: `https://github.com/${{ github.repository }}`
-          3. Select version and add to your target
+          3. Select version **${{ env.VERSION }}** and add to your target
+
+          SPM will automatically download the pre-compiled XCFrameworks!
 
           #### Manual Installation
-          Download the source archive and integrate the `Sources/` directory into your project.
+          Download the XCFramework files below and add them to your project:
+          - `SCXStarscream.xcframework.zip`
+          - `SCXSocketIO.xcframework.zip`
 
-          ### What's Included
-          - ✅ All Socket.IO classes prefixed with ${{ env.PREFIX }}
-          - ✅ All Starscream classes prefixed with ${{ env.PREFIX }}
-          - ✅ Privacy manifest included
-          - ✅ Full source code (no binaries)
-          - ✅ Ready for SPM integration
-
-          ### Usage
+          ### 🚀 Usage
           ```swift
           import SCXSocketIO
 
           let manager = SCXSocketManager(socketURL: URL(string: "https://example.com")!)
           let socket = manager.defaultSocket
+
+          socket.on(clientEvent: .connect) { data, ack in
+              print("Connected!")
+          }
+
           socket.connect()
           ```
 
-          ### Checksums
+          ### 📋 What's in this Release
+
+          | File | Size | Checksum |
+          |------|------|----------|
+          | SCXStarscream.xcframework.zip | - | `${{ env.STARSCREAM_CHECKSUM }}` |
+          | SCXSocketIO.xcframework.zip | - | `${{ env.SOCKETIO_CHECKSUM }}` |
+
+          ### 📚 Documentation
+          - [Quick Start Guide](https://github.com/${{ github.repository }}/blob/main/QUICKSTART.md)
+          - [Full Usage Documentation](https://github.com/${{ github.repository }}/blob/main/USAGE.md)
+          - [Contributing Guide](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md)
+
+          ### ⚡ Why Pre-compiled Binaries?
+          - **Faster builds** - No need to compile Socket.IO on every clean build
+          - **Consistent** - Same binary for all users
+          - **Tested** - Built and tested in CI/CD
+
+          ---
+
+          **Full Checksums:**
           ```
           $(cat checksums.txt)
           ```
-
-          For detailed usage instructions, see [USAGE.md](https://github.com/${{ github.repository }}/blob/${{ env.VERSION }}/USAGE.md)
         files: |
-          ${{ env.ARCHIVE_NAME }}
+          build/SCXStarscream.xcframework.zip
+          build/SCXSocketIO.xcframework.zip
           checksums.txt
         draft: false
         prerelease: false
