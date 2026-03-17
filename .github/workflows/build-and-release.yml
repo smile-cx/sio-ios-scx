@@ -28,7 +28,7 @@ jobs:
       with:
         ref: main
         fetch-depth: 0
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.PAT_TOKEN }}
 
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
