@@ -46,6 +46,9 @@ find "$FULL_SOURCE_PATH" -name "*.swift.backup" -type f -delete
 echo "Extracting symbols..."
 SYMBOLS_FILE=$(mktemp)
 
+# List of Foundation/Swift types to NEVER prefix
+SYSTEM_TYPES="URL URLRequest URLResponse URLSession Data String Int Bool Double Float Array Dictionary Set Optional Result Error AnyObject Any Codable Decodable Encodable UUID Date DateFormatter TimeInterval NSObject DispatchQueue DispatchGroup Task OutputStream InputStream"
+
 for file in $SWIFT_FILES; do
     # Extract class, struct, enum, protocol, actor names
     grep -E "^\s*(public|open|internal|private|fileprivate)?\s*(final|static)?\s*(class|struct|enum|protocol|actor|extension)\s+([A-Z][a-zA-Z0-9_]*)" "$file" | \
@@ -54,6 +57,26 @@ done
 
 # Sort and unique
 sort -u "$SYMBOLS_FILE" -o "$SYMBOLS_FILE"
+
+# Filter out system types
+FILTERED_SYMBOLS=$(mktemp)
+while IFS= read -r symbol; do
+    IS_SYSTEM=false
+    for sys_type in $SYSTEM_TYPES; do
+        if [ "$symbol" = "$sys_type" ]; then
+            IS_SYSTEM=true
+            break
+        fi
+    done
+
+    if [ "$IS_SYSTEM" = false ]; then
+        echo "$symbol" >> "$FILTERED_SYMBOLS"
+    else
+        echo "Skipping system type: $symbol"
+    fi
+done < "$SYMBOLS_FILE"
+
+mv "$FILTERED_SYMBOLS" "$SYMBOLS_FILE"
 
 SYMBOL_COUNT=$(wc -l < "$SYMBOLS_FILE")
 echo "Found $SYMBOL_COUNT unique symbols to prefix"
@@ -91,20 +114,43 @@ for file in $SWIFT_FILES; do
             # Prefix extension declarations
             gsed -i "s/extension\s\+\b${symbol}\b/extension ${PREFIX}${symbol}/g" "$file"
 
-            # Prefix type usage (: Symbol, <Symbol>, [Symbol], Symbol.self, etc.)
+            # Prefix type usage in various contexts
+            # After colon (type annotations)
             gsed -i "s/:\s*\b${symbol}\b/: ${PREFIX}${symbol}/g" "$file"
-            gsed -i "s/<\s*\b${symbol}\b/<${PREFIX}${symbol}/g" "$file"
-            gsed -i "s/\[\s*\b${symbol}\b/[${PREFIX}${symbol}/g" "$file"
+
+            # In generics <Symbol>
+            gsed -i "s/<\b${symbol}\b>/<${PREFIX}${symbol}>/g" "$file"
+            gsed -i "s/<\b${symbol}\b,/<${PREFIX}${symbol},/g" "$file"
+            gsed -i "s/,\s*\b${symbol}\b>/, ${PREFIX}${symbol}>/g" "$file"
+
+            # In arrays/collections [Symbol]
+            gsed -i "s/\[\b${symbol}\b\]/[${PREFIX}${symbol}]/g" "$file"
+
+            # Symbol.self
             gsed -i "s/\b${symbol}\b\.self/${PREFIX}${symbol}.self/g" "$file"
 
-            # Prefix in function parameters and return types
-            gsed -i "s/->\s*\b${symbol}\b/-> ${PREFIX}${symbol}/g" "$file"
-            gsed -i "s/(\s*\b${symbol}\b/(${PREFIX}${symbol}/g" "$file"
+            # Symbol.something (accessing static members/types)
+            gsed -i "s/\b${symbol}\b\./${PREFIX}${symbol}./g" "$file"
 
-            # Prefix initializations
+            # Return types -> Symbol
+            gsed -i "s/->\s*\b${symbol}\b/-> ${PREFIX}${symbol}/g" "$file"
+
+            # Function parameters (Symbol)
+            gsed -i "s/(\b${symbol}\b)/(${PREFIX}${symbol})/g" "$file"
+            gsed -i "s/(\b${symbol}\b,/(${PREFIX}${symbol},/g" "$file"
+            gsed -i "s/,\s*\b${symbol}\b)/, ${PREFIX}${symbol})/g" "$file"
+
+            # Variable initialization = Symbol(
             gsed -i "s/=\s*\b${symbol}\b(/= ${PREFIX}${symbol}(/g" "$file"
-            gsed -i "s/let\s\+\w\+\s*:\s*\b${symbol}\b/let \0: ${PREFIX}${symbol}/g" "$file"
-            gsed -i "s/var\s\+\w\+\s*:\s*\b${symbol}\b/var \0: ${PREFIX}${symbol}/g" "$file"
+
+            # "as Symbol" and "is Symbol" casts
+            gsed -i "s/\s\+as\s\+\b${symbol}\b/ as ${PREFIX}${symbol}/g" "$file"
+            gsed -i "s/\s\+as?\s\+\b${symbol}\b/ as? ${PREFIX}${symbol}/g" "$file"
+            gsed -i "s/\s\+as!\s\+\b${symbol}\b/ as! ${PREFIX}${symbol}/g" "$file"
+            gsed -i "s/\s\+is\s\+\b${symbol}\b/ is ${PREFIX}${symbol}/g" "$file"
+
+            # Type constraints where Symbol:
+            gsed -i "s/\bwhere\s\+\b${symbol}\b:/where ${PREFIX}${symbol}:/g" "$file"
         fi
     done < "$SYMBOLS_FILE"
 done

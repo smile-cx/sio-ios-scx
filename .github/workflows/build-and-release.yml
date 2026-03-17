@@ -71,17 +71,15 @@ jobs:
         find starscream-source/Sources -name "*.swift" -type f | sort
         echo "Total files: $(find starscream-source/Sources -name "*.swift" -type f | wc -l)"
 
-        # Prefix ALL sources, not just Starscream subdirectory
+        # Prefix ALL sources at once (not module by module)
+        # This ensures symbols can reference each other across modules
         echo ""
-        echo "Prefixing all Starscream modules..."
-        for dir in starscream-source/Sources/*/; do
-          dirname=$(basename "$dir")
-          echo "Processing module: $dirname"
-          ./scripts/prefix-symbols.sh starscream-source "Sources/$dirname" Starscream $PREFIX
-        done
+        echo "Prefixing all Starscream symbols together..."
+        ./scripts/prefix-symbols.sh starscream-source Sources Starscream $PREFIX
 
         echo ""
-        echo "=== After prefixing all modules ==="
+        echo "=== After prefixing ==="
+        echo "Verifying files still exist:"
         find starscream-source/Sources -name "*.swift" -type f | wc -l
 
         # Update Starscream Package.swift
