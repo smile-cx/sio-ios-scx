@@ -66,16 +66,23 @@ jobs:
 
     - name: Prefix Starscream symbols
       run: |
-        echo "=== Before prefixing Starscream ==="
-        find starscream-source/Sources/Starscream -name "*.swift" -type f | sort
-        echo "Total files: $(find starscream-source/Sources/Starscream -name "*.swift" -type f | wc -l)"
+        echo "=== Starscream has multi-module structure ==="
+        echo "Listing all Swift files in Sources/:"
+        find starscream-source/Sources -name "*.swift" -type f | sort
+        echo "Total files: $(find starscream-source/Sources -name "*.swift" -type f | wc -l)"
 
-        ./scripts/prefix-symbols.sh starscream-source Sources/Starscream Starscream $PREFIX
+        # Prefix ALL sources, not just Starscream subdirectory
+        echo ""
+        echo "Prefixing all Starscream modules..."
+        for dir in starscream-source/Sources/*/; do
+          dirname=$(basename "$dir")
+          echo "Processing module: $dirname"
+          ./scripts/prefix-symbols.sh starscream-source "Sources/$dirname" Starscream $PREFIX
+        done
 
         echo ""
-        echo "=== After prefixing Starscream ==="
-        find starscream-source/Sources/Starscream -name "*.swift" -type f | sort
-        echo "Total files: $(find starscream-source/Sources/Starscream -name "*.swift" -type f | wc -l)"
+        echo "=== After prefixing all modules ==="
+        find starscream-source/Sources -name "*.swift" -type f | wc -l
 
         # Update Starscream Package.swift
         cd starscream-source
@@ -134,11 +141,18 @@ jobs:
         mkdir -p Sources/SCXStarscream
         mkdir -p Sources/SCXSocketIO
 
-        echo "=== Copying Starscream files ==="
-        echo "Source directory contents:"
-        ls -la ../starscream-source/Sources/Starscream/
+        echo "=== Copying ALL Starscream modules ==="
+        echo "Source structure:"
+        ls -la ../starscream-source/Sources/
 
-        cp -rv ../starscream-source/Sources/Starscream/* Sources/SCXStarscream/
+        # Copy ALL subdirectories from Sources/, not just Starscream/
+        echo ""
+        echo "Copying all modules to SCXStarscream..."
+        for dir in ../starscream-source/Sources/*/; do
+          dirname=$(basename "$dir")
+          echo "Copying module: $dirname"
+          cp -rv "$dir"* Sources/SCXStarscream/
+        done
 
         echo ""
         echo "Copied to build-temp/Sources/SCXStarscream/:"
