@@ -95,12 +95,15 @@ jobs:
         find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' -exec \
           sed -i '' "s/import Starscream/import ${PREFIX}Starscream/g" {} +
 
-        # Update module-qualified references: Starscream.Foo -> SCXStarscream.SCXFoo
-        # The prefix script did NOT rename types after "Starscream." because the module
-        # name is not in own_types. So the types are still original names after the dot.
-        # We need to both update the module name AND prefix the type name.
-        find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' -exec \
-          sed -i '' "s/Starscream\.\([A-Z]\)/SCXStarscream.SCX\1/g" {} +
+        # Update module-qualified references: Module.Foo -> SCXModule.SCXFoo
+        # The prefix script did NOT rename types after "Starscream." or "SocketIO."
+        # because module names are not in own_types. We need to both update the
+        # module name AND prefix the type name.
+        find build-pkg/Sources -name '*.swift' -exec \
+          sed -i '' \
+            -e "s/Starscream\.\([A-Z]\)/SCXStarscream.SCX\1/g" \
+            -e "s/SocketIO\.\([A-Z]\)/SCXSocketIO.SCX\1/g" \
+          {} +
 
         echo "Cross-module references updated"
 
