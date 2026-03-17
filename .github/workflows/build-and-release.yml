@@ -58,21 +58,8 @@ jobs:
         echo "STARSCREAM_VERSION=$STAR_VER" >> $GITHUB_ENV
         echo "Starscream cloned at $STAR_VER"
 
-    # ── Prefix symbols ──────────────────────────────────────────────────
-    - name: Prefix Starscream symbols
-      run: python3 scripts/prefix-symbols.py starscream-source/Sources "$PREFIX"
-
-    - name: Prefix Socket.IO symbols
-      run: python3 scripts/prefix-symbols.py socketio-source/Source/SocketIO "$PREFIX"
-
-    - name: Update cross-module imports
-      run: |
-        find socketio-source/Source/SocketIO -name '*.swift' -exec \
-          sed -i '' "s/import Starscream/import ${PREFIX}Starscream/g" {} +
-        echo "Cross-module imports updated"
-
-    # ── Prepare build package ────────────────────────────────────────────
-    - name: Assemble build package
+    # ── Assemble sources first, then prefix everything together ─────────
+    - name: Assemble build package sources
       run: |
         mkdir -p build-pkg/Sources/${PREFIX}Starscream
         mkdir -p build-pkg/Sources/${PREFIX}SocketIO
@@ -81,7 +68,6 @@ jobs:
         for dir in starscream-source/Sources/*/; do
           cp -R "$dir"/* "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
         done
-        # Also copy any top-level Swift files in Sources/
         cp starscream-source/Sources/*.swift "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
 
         # Copy Socket.IO sources
@@ -93,6 +79,24 @@ jobs:
 
         echo "Starscream Swift files: $(find build-pkg/Sources/${PREFIX}Starscream -name '*.swift' | wc -l)"
         echo "SocketIO Swift files:   $(find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' | wc -l)"
+
+    - name: Prefix all symbols (single pass across both libraries)
+      run: |
+        # Run prefix on the entire Sources dir so both Starscream and SocketIO
+        # types are discovered and renamed consistently across both libraries
+        python3 scripts/prefix-symbols.py build-pkg/Sources "$PREFIX"
+
+    - name: Fix cross-module references
+      run: |
+        # Update import statements
+        find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' -exec \
+          sed -i '' "s/import Starscream/import ${PREFIX}Starscream/g" {} +
+
+        # Update module-qualified references: Starscream.Foo -> SCXStarscream.Foo
+        find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' -exec \
+          sed -i '' "s/Starscream\./SCXStarscream./g" {} +
+
+        echo "Cross-module references updated"
 
     - name: Generate build Package.swift
       run: |
