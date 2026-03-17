@@ -1,0 +1,31 @@
+SCXSocketIO
+Copyright (c) 2024-2026 Smile.io
+
+This product includes modified versions of the following third-party software:
+
+================================================================================
+
+Socket.IO Client Swift
+https://github.com/socketio/socket.io-client-swift
+Copyright (c) 2014-2015 Erik Little
+Licensed under the MIT License
+
+MODIFICATIONS: All public symbol names have been prefixed with "SCX" to avoid
+symbol conflicts during integration. The source code has been compiled into
+binary XCFramework distributions for iOS, macOS, tvOS, and watchOS.
+
+================================================================================
+
+Starscream WebSocket Library
+https://github.com/daltoniam/Starscream
+Copyright (c) 2014-2023 Dalton Cherry
+Licensed under the Apache License, Version 2.0
+
+MODIFICATIONS: All public symbol names have been prefixed with "SCX" to avoid
+symbol conflicts during integration. The source code has been compiled into
+binary XCFramework distributions for iOS, macOS, tvOS, and watchOS.
+
+================================================================================
+
+The complete license texts for these third-party components are included in
+the LICENSE file distributed with this software.

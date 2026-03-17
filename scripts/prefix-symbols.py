@@ -4,6 +4,10 @@ Prefix all Swift type declarations and their usages across source files.
 
 Usage: python3 prefix-symbols.py <source_dir> <prefix> [--dry-run]
 
+This script modifies third-party source code by prefixing symbol names.
+This constitutes a modification under both MIT and Apache 2.0 licenses.
+Ensure proper attribution and license preservation per LICENSE and NOTICE files.
+
 This script:
 1. Scans all .swift files for type declarations (class, struct, enum, protocol, actor, typealias)
 2. Builds a rename map: OriginalName -> PREFIXOriginalName

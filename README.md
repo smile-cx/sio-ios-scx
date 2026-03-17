@@ -98,6 +98,24 @@ The build is fully automated via GitHub Actions:
 - tvOS 13+
 - watchOS 6+
 
-## License
+## License and Third-Party Notices
 
-This project repackages [socket.io-client-swift](https://github.com/socketio/socket.io-client-swift) (MIT License) and [Starscream](https://github.com/daltoniam/Starscream) (Apache 2.0 License). See the original repositories for license details.
+This distribution contains modified versions of third-party open-source software. All modifications consist of prefixing public symbol names with "SCX" and compiling the modified source code into binary XCFrameworks for distribution.
+
+### Included Components
+
+This distribution includes modified versions of:
+
+- **[Socket.IO Client Swift](https://github.com/socketio/socket.io-client-swift)** - Copyright (c) 2014-2015 Erik Little - [MIT License](https://opensource.org/licenses/MIT)
+- **[Starscream](https://github.com/daltoniam/Starscream)** - Copyright (c) 2014-2023 Dalton Cherry - [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+
+### Compliance
+
+The complete license texts for both upstream projects are preserved in the [LICENSE](LICENSE) file. Attribution notices and modification details are documented in the [NOTICE](NOTICE) file.
+
+This distribution complies with the redistribution requirements of both the MIT License and Apache License 2.0, including:
+- Preservation of original copyright notices
+- Preservation of complete license texts
+- Documentation of modifications made to the original software
+
+**Important**: This is a modified distribution and should not be confused with the official releases of Socket.IO Client Swift or Starscream. For the unmodified versions, please refer to the original upstream repositories linked above.

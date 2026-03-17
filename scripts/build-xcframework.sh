@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # Build XCFrameworks from prefixed SPM package
+# This script builds modified versions of third-party source code.
+# See LICENSE and NOTICE files for licensing and attribution information.
 # Usage: ./build-xcframework.sh <package_dir> <output_dir> <scheme1> [scheme2 ...]
 
 PACKAGE_DIR="${1:?Usage: $0 <package_dir> <output_dir> <scheme1> [scheme2 ...]}"

@@ -85,6 +85,8 @@ jobs:
 
     - name: Prefix all symbols (single pass across both libraries)
       run: |
+        # MODIFICATION STEP: This modifies upstream source code per Apache 2.0 Section 4(b)
+        # and MIT License redistribution terms. See LICENSE and NOTICE files for details.
         # Run prefix on the entire Sources dir so both Starscream and SocketIO
         # types are discovered and renamed consistently across both libraries
         python3 scripts/prefix-symbols.py build-pkg/Sources "$PREFIX"
@@ -284,6 +286,10 @@ jobs:
       run: |
         cd build/output
 
+        # Copy LICENSE and NOTICE files for inclusion in release
+        cp ../../LICENSE .
+        cp ../../NOTICE .
+
         for FW in *.xcframework; do
           ZIPNAME="${FW%.xcframework}.xcframework.zip"
           zip -r -y "$ZIPNAME" "$FW"
@@ -411,6 +417,8 @@ jobs:
           build/output/SCXStarscream.xcframework.zip
           build/output/SCXSocketIO.xcframework.zip
           build/output/checksums.txt
+          build/output/LICENSE
+          build/output/NOTICE
         draft: false
         prerelease: false
       env:
