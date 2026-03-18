@@ -78,40 +78,15 @@ jobs:
         # Copy Socket.IO sources preserving subdirectory structure
         cp -R socketio-source/Source/SocketIO/* "build-pkg/Sources/SocketIO/"
 
-        # Handle duplicate filenames and type conflicts between Starscream and SocketIO
-        # Both may define classes with the same name (e.g. SSLSecurity). Since they're
-        # now in one module, we rename the SocketIO versions to avoid redeclaration.
+        # Rename duplicate filenames now (types will be renamed after prefix step)
         find build-pkg/Sources/SocketIO -name '*.swift' | while read f; do
           base=$(basename "$f")
           if [ -f "build-pkg/Sources/Starscream/$base" ]; then
             dir=$(dirname "$f")
             newname="${base%.swift}_SIO.swift"
             mv "$f" "$dir/$newname"
-            echo "Renamed file: $base -> $newname"
-            # Also rename any type declarations inside to avoid redeclaration
-            # Add SIO suffix to class/struct/enum/protocol names that would conflict
-            sed -i '' \
-              -e 's/class SCX/class SCXSIO_/g' \
-              -e 's/struct SCX/struct SCXSIO_/g' \
-              -e 's/enum SCX/enum SCXSIO_/g' \
-              -e 's/protocol SCX/protocol SCXSIO_/g' \
-              "$dir/$newname"
-            echo "  Renamed types inside to SCXSIO_ prefix"
+            echo "Renamed duplicate file: $base -> $newname"
           fi
-        done
-
-        # Update references to renamed SocketIO types in SocketIO files only
-        # (e.g. SCXSSLSecurity -> SCXSIO_SSLSecurity where used in SocketIO code)
-        for renamed in $(find build-pkg/Sources/SocketIO -name '*_SIO.swift' 2>/dev/null); do
-          # Extract the renamed type names
-          grep -oE 'class SCXSIO_[A-Za-z0-9_]+|struct SCXSIO_[A-Za-z0-9_]+|enum SCXSIO_[A-Za-z0-9_]+|protocol SCXSIO_[A-Za-z0-9_]+' "$renamed" | \
-            sed 's/^[^ ]* //' | while read newtype; do
-              # Derive the old name (SCXSIO_Foo -> SCXFoo)
-              oldtype=$(echo "$newtype" | sed 's/SCXSIO_/SCX/')
-              echo "  Updating references: $oldtype -> $newtype in SocketIO files"
-              find build-pkg/Sources/SocketIO -name '*.swift' -exec \
-                sed -i '' "s/\b${oldtype}\b/${newtype}/g" {} +
-            done
         done
 
         # Copy PrivacyInfo.xcprivacy at Sources root
@@ -145,6 +120,30 @@ jobs:
           {} +
 
         echo "Cross-module references updated"
+
+    - name: Resolve duplicate type declarations
+      run: |
+        # After prefixing, duplicate files (e.g. SSLSecurity_SIO.swift and SSLSecurity.swift)
+        # may have the same prefixed type names. Rename types in the _SIO files.
+        for sio_file in $(find build-pkg/Sources/SocketIO -name '*_SIO.swift' 2>/dev/null); do
+          echo "Processing duplicate: $sio_file"
+
+          # Extract type declarations from this file
+          grep -oE '(class|struct|enum|protocol) SCX[A-Za-z0-9_]+' "$sio_file" | while read decl; do
+            keyword=$(echo "$decl" | awk '{print $1}')
+            oldtype=$(echo "$decl" | awk '{print $2}')
+            newtype=$(echo "$oldtype" | sed 's/^SCX/SCXSIO/')
+
+            echo "  Renaming: $oldtype -> $newtype"
+
+            # Rename in the duplicate file itself
+            sed -i '' "s/${oldtype}/${newtype}/g" "$sio_file"
+
+            # Rename references in ALL SocketIO files (not Starscream)
+            find build-pkg/Sources/SocketIO -name '*.swift' -exec \
+              sed -i '' "s/${oldtype}/${newtype}/g" {} +
+          done
+        done
 
     - name: Generate build Package.swift
       run: |
