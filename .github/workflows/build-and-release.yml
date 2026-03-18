@@ -28,7 +28,6 @@ jobs:
       with:
         ref: main
         fetch-depth: 0
-        token: ${{ secrets.PAT_TOKEN }}
 
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
@@ -45,21 +44,18 @@ jobs:
     - name: Clone Socket.IO
       run: |
         git clone --depth 1 --branch "$VERSION" "$SOCKETIO_REPO" socketio-source
-        echo "Socket.IO cloned at $VERSION"
 
     - name: Clone Starscream (dependency)
       run: |
         # Extract Starscream version from Socket.IO's Package.swift
         STAR_VER=$(grep -A5 'Starscream' socketio-source/Package.swift \
           | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-        echo "Detected Starscream version requirement: ${STAR_VER:-not found}"
         STAR_VER="${STAR_VER:-4.0.8}"
 
         git clone --depth 1 --branch "$STAR_VER" "$STARSCREAM_REPO" starscream-source \
           || git clone --depth 1 "$STARSCREAM_REPO" starscream-source
 
         echo "STARSCREAM_VERSION=$STAR_VER" >> $GITHUB_ENV
-        echo "Starscream cloned at $STAR_VER"
 
     # ── Assemble and prefix (two separate modules) ─────────────────────
     - name: Assemble build package sources
@@ -82,9 +78,6 @@ jobs:
 
         # Remove SocketIO's SSLSecurity wrapper (duplicate of Starscream's SCXSSLSecurity)
         rm -f "build-pkg/Sources/${PREFIX}SocketIO/Util/SSLSecurity.swift"
-
-        echo "Starscream files: $(find build-pkg/Sources/${PREFIX}Starscream -name '*.swift' | wc -l)"
-        echo "SocketIO files:   $(find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' | wc -l)"
 
     - name: "Step 1: Prefix Starscream types in both libraries"
       run: |
@@ -112,14 +105,11 @@ jobs:
         find build-pkg/Sources -name '*.swift' -exec \
           sed -i '' "s/SocketIO\.\([A-Z]\)/${PREFIX}SocketIO.SCX\1/g" {} +
 
-        echo "Cross-module references updated"
-
     - name: "Step 4: Add modification notices (Apache 2.0 compliance)"
       run: |
         # Add modification notices to source files as required by Apache License 2.0 Section 4(b)
         python3 scripts/add-modification-notices.py "build-pkg/Sources/${PREFIX}Starscream"
         python3 scripts/add-modification-notices.py "build-pkg/Sources/${PREFIX}SocketIO"
-        echo "Modification notices added to source files"
 
     - name: Generate build Package.swift
       run: |
@@ -139,8 +129,6 @@ jobs:
         # Fix security wrapper property access (security?.security -> security)
         find "build-pkg/Sources/${PREFIX}SocketIO" -name '*.swift' -exec \
           sed -i '' "s/security?\.security/security/g" {} +
-
-        echo "Removed cross-module imports and qualifiers (now single module)"
 
         cat > build-pkg/Package.swift << 'EOF'
         // swift-tools-version: 5.9
@@ -169,15 +157,11 @@ jobs:
         )
         EOF
 
-        echo "Generated Package.swift:"
-        cat build-pkg/Package.swift
-
     - name: Resolve & verify package
       run: |
         cd build-pkg
         swift package resolve
         swift package dump-package
-        echo "Package resolves successfully"
 
     # ── Build XCFrameworks ───────────────────────────────────────────────
     - name: Build XCFrameworks
@@ -196,10 +180,6 @@ jobs:
         done
 
         cd ..
-        echo ""
-        echo "=========================================="
-        echo "All XCFrameworks built"
-        echo "=========================================="
         ls -lh "$OUTPUT_DIR"/*.xcframework
 
     # ── Verify PrivacyInfo is embedded ───────────────────────────────────

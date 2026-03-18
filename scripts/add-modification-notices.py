@@ -122,17 +122,13 @@ def main():
         return
 
     modified_count = 0
-    skipped_count = 0
 
     for filepath in swift_files:
         if add_modification_notice_to_file(filepath):
             modified_count += 1
-        else:
-            skipped_count += 1
 
-    print(f"✓ Added modification notices to {modified_count} files")
-    if skipped_count > 0:
-        print(f"  Skipped {skipped_count} files (already had notices)")
+    if modified_count > 0:
+        print(f"✓ Added modification notices to {modified_count} files")
 
 if __name__ == '__main__':
     try:

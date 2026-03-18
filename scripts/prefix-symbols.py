@@ -244,8 +244,6 @@ def process_files(source_dir: str, prefix: str, dry_run: bool = False) -> Dict[s
             continue
         rename_map[sym] = f"{prefix}{sym}"
 
-    print(f"Found {len(swift_files)} files, {len(symbols)} symbols ({len(rename_map)} to rename)")
-
     if dry_run:
         print("[DRY RUN] No files modified.")
         return rename_map
