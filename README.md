@@ -124,8 +124,8 @@ This distribution contains modified versions of third-party open-source software
 
 This distribution includes modified versions of:
 
-- **[Socket.IO Client Swift](https://github.com/socketio/socket.io-client-swift)** - Copyright (c) 2014-2015 Erik Little - [MIT License](https://opensource.org/licenses/MIT)
-- **[Starscream](https://github.com/daltoniam/Starscream)** - Copyright (c) 2014-2016 Dalton Cherry - [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+- **[Socket.IO Client Swift](https://github.com/socketio/socket.io-client-swift)**
+- **[Starscream](https://github.com/daltoniam/Starscream)**
 
 ### Compliance
 
