@@ -226,17 +226,48 @@ def process_files(source_dir: str, prefix: str, dry_run: bool = False) -> dict[s
     return rename_map
 
 
+def apply_rename_map_to_dir(target_dir: str, rename_map: dict[str, str]):
+    """Apply an existing rename map to all Swift files in target_dir."""
+    swift_files = find_swift_files(target_dir)
+    if not swift_files:
+        print(f"No Swift files found in {target_dir}")
+        return
+
+    own_types = set(rename_map.keys()) | set(rename_map.values())
+    print(f"\nApplying {len(rename_map)} renames to {len(swift_files)} files in {target_dir}...")
+    for filepath in swift_files:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            original = f.read()
+        modified = rename_symbols_in_content(original, rename_map, own_types)
+        if modified != original:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(modified)
+            print(f"  [modified] {os.path.basename(filepath)}")
+        else:
+            print(f"  [unchanged] {os.path.basename(filepath)}")
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <source_dir> <prefix> [--dry-run]")
+        print(f"Usage: {sys.argv[0]} <source_dir> <prefix> [--dry-run] [--apply-to <other_dir>]")
         sys.exit(1)
 
     source_dir = sys.argv[1]
     prefix = sys.argv[2]
     dry_run = '--dry-run' in sys.argv
 
+    # Optional: apply the same rename map to another directory
+    apply_to = None
+    if '--apply-to' in sys.argv:
+        idx = sys.argv.index('--apply-to')
+        if idx + 1 < len(sys.argv):
+            apply_to = sys.argv[idx + 1]
+
     if not os.path.isdir(source_dir):
         print(f"Error: {source_dir} is not a directory")
         sys.exit(1)
 
-    process_files(source_dir, prefix, dry_run)
+    rename_map = process_files(source_dir, prefix, dry_run)
+
+    if apply_to and os.path.isdir(apply_to) and rename_map:
+        apply_rename_map_to_dir(apply_to, rename_map)

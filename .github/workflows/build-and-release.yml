@@ -61,101 +61,55 @@ jobs:
         echo "STARSCREAM_VERSION=$STAR_VER" >> $GITHUB_ENV
         echo "Starscream cloned at $STAR_VER"
 
-    # ── Assemble sources first, then prefix everything together ─────────
+    # ── Assemble and prefix (two separate modules) ─────────────────────
     - name: Assemble build package sources
       run: |
-        # Single target with subdirectories to avoid file name collisions
-        # (e.g. both Starscream and SocketIO have SSLSecurity.swift)
-        mkdir -p build-pkg/Sources/Starscream
-        mkdir -p build-pkg/Sources/SocketIO
+        mkdir -p build-pkg/Sources/${PREFIX}Starscream
+        mkdir -p build-pkg/Sources/${PREFIX}SocketIO
 
-        # Copy Starscream sources into subdirectory
+        # Copy Starscream sources
         for dir in starscream-source/Sources/*/; do
-          cp -R "$dir"/* "build-pkg/Sources/Starscream/" 2>/dev/null || true
+          cp -R "$dir"/* "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
         done
-        cp starscream-source/Sources/*.swift "build-pkg/Sources/Starscream/" 2>/dev/null || true
+        cp starscream-source/Sources/*.swift "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
 
-        # Copy Socket.IO sources preserving subdirectory structure
-        cp -R socketio-source/Source/SocketIO/* "build-pkg/Sources/SocketIO/"
+        # Copy Socket.IO sources
+        cp -R socketio-source/Source/SocketIO/* "build-pkg/Sources/${PREFIX}SocketIO/"
 
-        # Rename duplicate filenames now (types will be renamed after prefix step)
-        find build-pkg/Sources/SocketIO -name '*.swift' | while read f; do
-          base=$(basename "$f")
-          if [ -f "build-pkg/Sources/Starscream/$base" ]; then
-            dir=$(dirname "$f")
-            newname="${base%.swift}_SIO.swift"
-            mv "$f" "$dir/$newname"
-            echo "Renamed duplicate file: $base -> $newname"
-          fi
-        done
+        # Copy PrivacyInfo.xcprivacy into both targets
+        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/${PREFIX}Starscream/"
+        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/${PREFIX}SocketIO/"
 
-        # Copy PrivacyInfo.xcprivacy at Sources root
-        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/"
+        echo "Starscream files: $(find build-pkg/Sources/${PREFIX}Starscream -name '*.swift' | wc -l)"
+        echo "SocketIO files:   $(find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' | wc -l)"
 
-        echo "Starscream files: $(find build-pkg/Sources/Starscream -name '*.swift' | wc -l)"
-        echo "SocketIO files:   $(find build-pkg/Sources/SocketIO -name '*.swift' | wc -l)"
-        echo "Total Swift files: $(find build-pkg/Sources -name '*.swift' | wc -l)"
-
-    - name: Prefix all symbols (single pass across both libraries)
+    - name: "Step 1: Prefix Starscream types in both libraries"
       run: |
-        # MODIFICATION STEP: This modifies upstream source code per Apache 2.0 Section 4(b)
-        # and MIT License redistribution terms. See LICENSE and NOTICE files for details.
-        # Run prefix on the entire Sources dir so both Starscream and SocketIO
-        # types are discovered and renamed consistently across both libraries
-        python3 scripts/prefix-symbols.py build-pkg/Sources "$PREFIX"
+        # Prefix Starscream types in Starscream sources AND apply the same
+        # rename map to SocketIO sources (so Starscream type references get prefixed)
+        python3 scripts/prefix-symbols.py build-pkg/Sources/${PREFIX}Starscream "$PREFIX" \
+          --apply-to build-pkg/Sources/${PREFIX}SocketIO
 
-    - name: Fix cross-module references
+    - name: "Step 2: Prefix SocketIO's own types"
       run: |
-        # Since everything is now in a single module (SCXSocketIO), remove
-        # import Starscream statements (the types are in the same module now)
-        find build-pkg/Sources -name '*.swift' -exec \
-          sed -i '' "s/^import Starscream$//" {} +
+        # Now prefix SocketIO's own types (Starscream types already prefixed from step 1)
+        python3 scripts/prefix-symbols.py build-pkg/Sources/${PREFIX}SocketIO "$PREFIX"
 
-        # Fix module-qualified references: Starscream.Foo -> SCXFoo (same module, no qualifier needed)
-        # SocketIO.Foo -> SCXFoo (same module)
+    - name: "Step 3: Fix cross-module references"
+      run: |
+        # Update import statements
+        find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' -exec \
+          sed -i '' "s/import Starscream/import ${PREFIX}Starscream/g" {} +
+
+        # Update module-qualified references: Starscream.Foo -> SCXStarscream.SCXFoo
+        find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' -exec \
+          sed -i '' "s/Starscream\.\([A-Z]\)/${PREFIX}Starscream.SCX\1/g" {} +
+
+        # Update self-module references: SocketIO.Foo -> SCXSocketIO.SCXFoo
         find build-pkg/Sources -name '*.swift' -exec \
-          sed -i '' \
-            -e "s/Starscream\.\([A-Z]\)/SCX\1/g" \
-            -e "s/SocketIO\.\([A-Z]\)/SCX\1/g" \
-          {} +
+          sed -i '' "s/SocketIO\.\([A-Z]\)/${PREFIX}SocketIO.SCX\1/g" {} +
 
         echo "Cross-module references updated"
-
-    - name: Resolve duplicate type declarations
-      run: |
-        # After prefixing, duplicate files (e.g. SSLSecurity_SIO.swift and SSLSecurity.swift)
-        # may have the same prefixed type names. Rename types in the _SIO files.
-        # Use a temp file to avoid subshell pipe issues.
-        RENAMES_FILE=$(mktemp)
-
-        for sio_file in $(find build-pkg/Sources/SocketIO -name '*_SIO.swift' 2>/dev/null); do
-          echo "Processing duplicate: $sio_file"
-
-          # Extract type declarations and write to temp file
-          grep -oE '(class|struct|enum|protocol) SCX[A-Za-z0-9_]+' "$sio_file" | \
-            awk '{print $2}' | sort -u > "$RENAMES_FILE"
-
-          echo "  Types found: $(cat $RENAMES_FILE)"
-
-          # Process each type
-          while IFS= read -r oldtype; do
-            [ -z "$oldtype" ] && continue
-            newtype=$(echo "$oldtype" | sed 's/^SCX/SCXSIO/')
-            echo "  Renaming: $oldtype -> $newtype"
-
-            # Rename in ALL SocketIO files (including the _SIO file itself)
-            find build-pkg/Sources/SocketIO -name '*.swift' -exec \
-              sed -i '' "s/${oldtype}/${newtype}/g" {} +
-          done < "$RENAMES_FILE"
-        done
-
-        rm -f "$RENAMES_FILE"
-
-        # Verify no duplicates remain
-        echo "Checking for remaining duplicate declarations..."
-        for sio_file in $(find build-pkg/Sources/SocketIO -name '*_SIO.swift' 2>/dev/null); do
-          grep -E '(class|struct|enum|protocol) SCX[A-Z]' "$sio_file" | head -3
-        done
 
     - name: Generate build Package.swift
       run: |
@@ -174,12 +128,19 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "\(prefix)SocketIO", type: .dynamic, targets: ["\(prefix)SocketIO"]),
+                .library(name: "\(prefix)Starscream", type: .dynamic, targets: ["\(prefix)Starscream"]),
+                .library(name: "\(prefix)SocketIO",   type: .dynamic, targets: ["\(prefix)SocketIO"]),
             ],
             targets: [
                 .target(
+                    name: "\(prefix)Starscream",
+                    path: "Sources/\(prefix)Starscream",
+                    resources: [.copy("PrivacyInfo.xcprivacy")]
+                ),
+                .target(
                     name: "\(prefix)SocketIO",
-                    path: "Sources",
+                    dependencies: [.target(name: "\(prefix)Starscream")],
+                    path: "Sources/\(prefix)SocketIO",
                     resources: [.copy("PrivacyInfo.xcprivacy")]
                 ),
             ]
@@ -199,7 +160,7 @@ jobs:
     # ── Build XCFrameworks ───────────────────────────────────────────────
     - name: Build XCFrameworks
       run: |
-        SCHEMES=("${PREFIX}SocketIO")
+        SCHEMES=("${PREFIX}Starscream" "${PREFIX}SocketIO")
         ARCHIVE_DIR="$(pwd)/build/archives"
         OUTPUT_DIR="$(pwd)/build/output"
         DD="$(pwd)/build/DerivedData"
@@ -350,7 +311,9 @@ jobs:
 
         shasum -a 256 *.zip | tee checksums.txt
 
+        STAR_CS=$(grep "${PREFIX}Starscream" checksums.txt | awk '{print $1}')
         SIO_CS=$(grep "${PREFIX}SocketIO" checksums.txt | awk '{print $1}')
+        echo "STARSCREAM_CHECKSUM=$STAR_CS" >> $GITHUB_ENV
         echo "SOCKETIO_CHECKSUM=$SIO_CS" >> $GITHUB_ENV
 
     # ── Update Package.swift for consumers ───────────────────────────────
@@ -358,6 +321,7 @@ jobs:
       run: |
         REPO="${{ github.repository }}"
         VER="${{ env.VERSION }}"
+        STAR_CS="${{ env.STARSCREAM_CHECKSUM }}"
         SIO_CS="${{ env.SOCKETIO_CHECKSUM }}"
 
         cat > Package.swift << PKGEOF
@@ -373,9 +337,15 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "SCXSocketIO", targets: ["SCXSocketIO"]),
+                .library(name: "SCXSocketIO",   targets: ["SCXSocketIO"]),
+                .library(name: "SCXStarscream", targets: ["SCXStarscream"]),
             ],
             targets: [
+                .binaryTarget(
+                    name: "SCXStarscream",
+                    url: "https://github.com/${REPO}/releases/download/${VER}/SCXStarscream.xcframework.zip",
+                    checksum: "${STAR_CS}"
+                ),
                 .binaryTarget(
                     name: "SCXSocketIO",
                     url: "https://github.com/${REPO}/releases/download/${VER}/SCXSocketIO.xcframework.zip",
@@ -448,14 +418,16 @@ jobs:
           ### Checksums
           | Artifact | SHA-256 |
           |----------|---------|
-          | SCXSocketIO.xcframework.zip | `${{ env.SOCKETIO_CHECKSUM }}` |
+          | SCXStarscream.xcframework.zip | `${{ env.STARSCREAM_CHECKSUM }}` |
+          | SCXSocketIO.xcframework.zip   | `${{ env.SOCKETIO_CHECKSUM }}`   |
 
           ### What's included
-          - All public types prefixed with `SCX` (Socket.IO + Starscream merged into single framework)
-          - PrivacyInfo.xcprivacy embedded
+          - All public types prefixed with `SCX`
+          - PrivacyInfo.xcprivacy embedded in both frameworks
           - iOS device + Simulator (arm64, x86_64)
           - Built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES`
         files: |
+          build/output/SCXStarscream.xcframework.zip
           build/output/SCXSocketIO.xcframework.zip
           build/output/checksums.txt
           build/output/LICENSE
