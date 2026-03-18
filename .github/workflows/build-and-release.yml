@@ -78,6 +78,17 @@ jobs:
         # Copy Socket.IO sources preserving subdirectory structure
         cp -R socketio-source/Source/SocketIO/* "build-pkg/Sources/SocketIO/"
 
+        # Rename duplicate filenames (Swift requires unique filenames within a target)
+        for f in build-pkg/Sources/SocketIO/**/*.swift; do
+          base=$(basename "$f")
+          if [ -f "build-pkg/Sources/Starscream/$base" ]; then
+            dir=$(dirname "$f")
+            newname="${base%.swift}_SIO.swift"
+            mv "$f" "$dir/$newname"
+            echo "Renamed duplicate: $base -> $newname"
+          fi
+        done
+
         # Copy PrivacyInfo.xcprivacy at Sources root
         cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/"
 
