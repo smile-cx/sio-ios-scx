@@ -127,6 +127,9 @@ if [ -f "$ROOT_DIR/Resources/PrivacyInfo.xcprivacy" ]; then
     cp "$ROOT_DIR/Resources/PrivacyInfo.xcprivacy" "$BUILD_PKG/Sources/${PREFIX}SocketIO/"
 fi
 
+# Remove SocketIO's SSLSecurity wrapper (duplicate of Starscream's SCXSSLSecurity)
+rm -f "$BUILD_PKG/Sources/${PREFIX}SocketIO/Util/SSLSecurity.swift"
+
 # Count and validate files
 STARSCREAM_COUNT=$(find "$BUILD_PKG/Sources/${PREFIX}Starscream" -name '*.swift' | wc -l | tr -d ' ')
 SOCKETIO_COUNT=$(find "$BUILD_PKG/Sources/${PREFIX}SocketIO" -name '*.swift' | wc -l | tr -d ' ')
@@ -187,6 +190,25 @@ fi
 echo ""
 echo "Generating Package.swift..."
 
+# Merge SCXStarscream into SCXSocketIO to create a single module
+# This avoids the "Unable to find module dependency" error in Xcode
+echo "Merging SCXStarscream sources into SCXSocketIO for single module..."
+cp -R "$BUILD_PKG/Sources/${PREFIX}Starscream"/* "$BUILD_PKG/Sources/${PREFIX}SocketIO/"
+
+# Remove import SCXStarscream from SocketIO sources (now same module)
+find "$BUILD_PKG/Sources/${PREFIX}SocketIO" -name '*.swift' -exec \
+    sed -i '' "/^import ${PREFIX}Starscream$/d" {} +
+
+# Remove module-qualified references (SCXStarscream.Type -> Type)
+find "$BUILD_PKG/Sources/${PREFIX}SocketIO" -name '*.swift' -exec \
+    sed -i '' "s/${PREFIX}Starscream\.//g" {} +
+
+# Fix security wrapper property access (security?.security -> security)
+find "$BUILD_PKG/Sources/${PREFIX}SocketIO" -name '*.swift' -exec \
+    sed -i '' "s/security?\.security/security/g" {} +
+
+echo "✓ Removed cross-module imports and qualifiers (now single module)"
+
 cat > "$BUILD_PKG/Package.swift" << 'EOF'
 // swift-tools-version: 5.9
 import PackageDescription
@@ -206,13 +228,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "\(prefix)Starscream",
-            path: "Sources/\(prefix)Starscream",
-            resources: [.copy("PrivacyInfo.xcprivacy")]
-        ),
-        .target(
             name: "\(prefix)SocketIO",
-            dependencies: [.target(name: "\(prefix)Starscream")],
             path: "Sources/\(prefix)SocketIO",
             resources: [.copy("PrivacyInfo.xcprivacy")]
         ),

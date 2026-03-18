@@ -125,15 +125,21 @@ This distribution contains modified versions of third-party open-source software
 This distribution includes modified versions of:
 
 - **[Socket.IO Client Swift](https://github.com/socketio/socket.io-client-swift)** - Copyright (c) 2014-2015 Erik Little - [MIT License](https://opensource.org/licenses/MIT)
-- **[Starscream](https://github.com/daltoniam/Starscream)** - Copyright (c) 2014-2023 Dalton Cherry - [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+- **[Starscream](https://github.com/daltoniam/Starscream)** - Copyright (c) 2014-2016 Dalton Cherry - [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 ### Compliance
 
-The complete license texts for both upstream projects are preserved in the [LICENSE](LICENSE) file. Attribution notices and modification details are documented in the [NOTICE](NOTICE) file.
+This distribution complies with the redistribution requirements of both the MIT License (Socket.IO Client Swift) and Apache License 2.0 (Starscream), including:
 
-This distribution complies with the redistribution requirements of both the MIT License and Apache License 2.0, including:
-- Preservation of original copyright notices
-- Preservation of complete license texts
-- Documentation of modifications made to the original software
+- **Preservation of original copyright notices**: All original copyright notices from Socket.IO Client Swift and Starscream are retained in both the source file headers and the LICENSE file
+- **Preservation of complete license texts**: The full text of both the MIT License and Apache License 2.0 are included in the [LICENSE](LICENSE) file
+- **Documentation of modifications**: All modifications made to the upstream source code are documented in the [NOTICE](NOTICE) file
+- **Modification notices in source files**: Modified source files automatically include notices indicating they have been changed, as required by Apache License 2.0 Section 4(b)
 
-**Important**: This is a modified distribution and should not be confused with the official releases of Socket.IO Client Swift or Starscream. For the unmodified versions, please refer to the original upstream repositories linked above.
+The complete license texts for both upstream projects are preserved in the [LICENSE](LICENSE) file. Attribution notices and detailed modification documentation are provided in the [NOTICE](NOTICE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) files.
+
+**Automated Compliance**: The build process automatically adds modification notices to all source files and preserves original copyright headers, ensuring consistent license compliance across all releases.
+
+**Important**: This is a modified derivative work distribution and should not be confused with the official releases of Socket.IO Client Swift or Starscream. For the unmodified upstream versions, please refer to the original repositories:
+- Socket.IO Client Swift: https://github.com/socketio/socket.io-client-swift
+- Starscream: https://github.com/daltoniam/Starscream

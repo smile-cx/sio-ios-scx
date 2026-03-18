@@ -70,25 +70,27 @@ echo "Copying Swift modules..."
 
 # iOS device modules
 SWIFTMOD_IOS=$(find "$DD/iOS/Build/Intermediates.noindex/ArchiveIntermediates" -name "${SCHEME}.swiftmodule" -type d 2>/dev/null | head -1)
+
 if [ -n "$SWIFTMOD_IOS" ]; then
     mkdir -p "$IOS_FW/Modules"
     cp -R "$SWIFTMOD_IOS" "$IOS_FW/Modules/"
     MODULE_COUNT=$(ls "$SWIFTMOD_IOS" 2>/dev/null | wc -l | tr -d ' ')
     echo "  ✓ iOS modules copied ($MODULE_COUNT files)"
 else
-    echo "  ✗ ERROR: iOS swiftmodule not found in $DD/iOS" >&2
+    echo "  ✗ ERROR: iOS swiftmodule not found" >&2
     exit 1
 fi
 
 # Simulator modules
 SWIFTMOD_SIM=$(find "$DD/Simulator/Build/Intermediates.noindex/ArchiveIntermediates" -name "${SCHEME}.swiftmodule" -type d 2>/dev/null | head -1)
+
 if [ -n "$SWIFTMOD_SIM" ]; then
     mkdir -p "$SIM_FW/Modules"
     cp -R "$SWIFTMOD_SIM" "$SIM_FW/Modules/"
     MODULE_COUNT=$(ls "$SWIFTMOD_SIM" 2>/dev/null | wc -l | tr -d ' ')
     echo "  ✓ Simulator modules copied ($MODULE_COUNT files)"
 else
-    echo "  ✗ ERROR: Simulator swiftmodule not found in $DD/Simulator" >&2
+    echo "  ✗ ERROR: Simulator swiftmodule not found" >&2
     exit 1
 fi
 
@@ -105,6 +107,8 @@ echo "✓ ${SCHEME}.xcframework created"
 # Verify Swift modules in XCFramework
 echo ""
 echo "Verifying Swift modules in XCFramework..."
+
+# Count all swiftinterface files
 IOS_MODULES=$(find "$OUTPUT_DIR/${SCHEME}.xcframework/ios-arm64" -name "*.swiftinterface" 2>/dev/null | wc -l | tr -d ' ')
 SIM_MODULES=$(find "$OUTPUT_DIR/${SCHEME}.xcframework/ios-arm64_x86_64-simulator" -name "*.swiftinterface" 2>/dev/null | wc -l | tr -d ' ')
 
@@ -112,13 +116,10 @@ if [ "$IOS_MODULES" -gt 0 ] && [ "$SIM_MODULES" -gt 0 ]; then
     echo "  ✓ iOS device modules: $IOS_MODULES files"
     echo "  ✓ Simulator modules: $SIM_MODULES files"
 
-    # Show samples
+    # Show module directories
     echo ""
-    echo "Sample iOS module files:"
-    find "$OUTPUT_DIR/${SCHEME}.xcframework/ios-arm64" -name "*.swiftinterface" 2>/dev/null | head -2
-    echo ""
-    echo "Sample Simulator module files:"
-    find "$OUTPUT_DIR/${SCHEME}.xcframework/ios-arm64_x86_64-simulator" -name "*.swiftinterface" 2>/dev/null | head -2
+    echo "Module structure:"
+    find "$OUTPUT_DIR/${SCHEME}.xcframework" -name "*.swiftmodule" -type d | sed 's|.*xcframework/||' | sort | uniq
 else
     echo "  ✗ ERROR: Swift modules MISSING from XCFramework!" >&2
     echo "    iOS modules found: $IOS_MODULES" >&2

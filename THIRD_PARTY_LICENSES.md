@@ -1,12 +1,27 @@
-This distribution contains modified versions of third-party open-source software.
-All symbol names have been prefixed with "SCX" for integration purposes.
+# Third-Party Open Source Licenses
 
-The original software and their respective licenses are preserved below.
+This document provides detailed information about the third-party open-source components included in this distribution.
 
-================================================================================
-Socket.IO Client Swift
-================================================================================
+## Overview
 
+SCXSocketIO is a derivative work distribution containing modified versions of:
+1. Socket.IO Client Swift (MIT License)
+2. Starscream WebSocket Library (Apache License 2.0)
+
+All modifications are performed by Smile.io and consist primarily of prefixing public symbol names with "SCX" to prevent symbol conflicts during integration.
+
+---
+
+## Socket.IO Client Swift
+
+**Project**: socket.io-client-swift
+**Homepage**: https://github.com/socketio/socket.io-client-swift
+**License**: MIT License
+**Copyright**: Copyright (c) 2014-2015 Erik Little
+
+### License Text
+
+```
 The MIT License (MIT)
 
 Copyright (c) 2014-2015 Erik Little
@@ -28,16 +43,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
 
-================================================================================
-Starscream WebSocket Library
-================================================================================
+### Modifications
 
+This distribution includes a modified version of Socket.IO Client Swift with the following changes:
+- All public type names prefixed with "SCX" (e.g., `SocketManager` → `SCXSocketManager`)
+- File names updated to reflect prefixed type names
+- Import statements and cross-module references updated accordingly
+- Source code compiled into binary XCFramework format
+
+All original copyright notices and license terms are preserved in the modified source files.
+
+---
+
+## Starscream WebSocket Library
+
+**Project**: Starscream
+**Homepage**: https://github.com/daltoniam/Starscream
+**License**: Apache License 2.0
+**Copyright**: Copyright (c) 2014-2016 Dalton Cherry
+
+### License Text
+
+```
                               Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
-
-   Copyright (c) 2014-2016 Dalton Cherry.
 
    TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
@@ -211,3 +243,29 @@ Starscream WebSocket Library
       of your accepting any such warranty or additional liability.
 
    END OF TERMS AND CONDITIONS
+```
+
+### Modifications
+
+This distribution includes a modified version of Starscream with the following changes:
+- All public type names prefixed with "SCX" (e.g., `WebSocket` → `SCXWebSocket`)
+- File names updated to reflect prefixed type names
+- Source code compiled into binary XCFramework format
+
+All original copyright notices and license terms are preserved in the modified source files. Modified files include notices indicating they have been changed, as required by Apache License 2.0 Section 4(b).
+
+---
+
+## Distribution and Use
+
+This derivative work distribution is provided under the same open-source licenses as the upstream components. Users of this distribution must comply with both:
+- The MIT License terms for Socket.IO Client Swift components
+- The Apache License 2.0 terms for Starscream components
+
+For complete license texts and legal terms, refer to the LICENSE file in this distribution.
+
+For attribution notices and detailed modification documentation, refer to the NOTICE file in this distribution.
+
+---
+
+**Note**: This distribution is not affiliated with or endorsed by the original authors of Socket.IO Client Swift or Starscream. For official, unmodified versions of these libraries, please visit their respective GitHub repositories.

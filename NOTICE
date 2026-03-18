@@ -1,7 +1,8 @@
 SCXSocketIO
 Copyright (c) 2024-2026 Smile.io
 
-This product includes modified versions of the following third-party software:
+This product is a derivative work distribution that includes modified versions
+of the following third-party open-source software:
 
 ================================================================================
 
@@ -10,22 +11,40 @@ https://github.com/socketio/socket.io-client-swift
 Copyright (c) 2014-2015 Erik Little
 Licensed under the MIT License
 
-MODIFICATIONS: All public symbol names have been prefixed with "SCX" to avoid
-symbol conflicts during integration. The source code has been compiled into
-binary XCFramework distributions for iOS, macOS, tvOS, and watchOS.
+MODIFICATIONS: This distribution contains a modified version of Socket.IO Client
+Swift. Modifications made by Smile.io include:
+- All public symbol names have been prefixed with "SCX" to avoid symbol conflicts
+  during integration
+- File names have been updated to reflect the prefixed type names
+- Import statements and cross-module references have been updated accordingly
+- The modified source code has been compiled into binary XCFramework distributions
+  for iOS, macOS, tvOS, and watchOS
+
+All original copyright notices and MIT License terms are preserved in the source
+files and in the LICENSE file distributed with this software.
 
 ================================================================================
 
 Starscream WebSocket Library
 https://github.com/daltoniam/Starscream
-Copyright (c) 2014-2023 Dalton Cherry
+Copyright (c) 2014-2016 Dalton Cherry
 Licensed under the Apache License, Version 2.0
 
-MODIFICATIONS: All public symbol names have been prefixed with "SCX" to avoid
-symbol conflicts during integration. The source code has been compiled into
-binary XCFramework distributions for iOS, macOS, tvOS, and watchOS.
+MODIFICATIONS: This distribution contains a modified version of Starscream.
+Modifications made by Smile.io include:
+- All public symbol names have been prefixed with "SCX" to avoid symbol conflicts
+  during integration
+- File names have been updated to reflect the prefixed type names
+- The modified source code has been compiled into binary XCFramework distributions
+  for iOS, macOS, tvOS, and watchOS
+
+All original copyright notices and Apache License 2.0 terms are preserved in the
+source files and in the LICENSE file distributed with this software.
+
+As required by Apache License 2.0 Section 4(b), modified files carry notices
+indicating they have been changed from the original.
 
 ================================================================================
 
-The complete license texts for these third-party components are included in
-the LICENSE file distributed with this software.
+The complete license texts for both upstream projects are included in the
+LICENSE file distributed with this software.
