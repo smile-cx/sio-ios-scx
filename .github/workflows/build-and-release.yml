@@ -125,24 +125,36 @@ jobs:
       run: |
         # After prefixing, duplicate files (e.g. SSLSecurity_SIO.swift and SSLSecurity.swift)
         # may have the same prefixed type names. Rename types in the _SIO files.
+        # Use a temp file to avoid subshell pipe issues.
+        RENAMES_FILE=$(mktemp)
+
         for sio_file in $(find build-pkg/Sources/SocketIO -name '*_SIO.swift' 2>/dev/null); do
           echo "Processing duplicate: $sio_file"
 
-          # Extract type declarations from this file
-          grep -oE '(class|struct|enum|protocol) SCX[A-Za-z0-9_]+' "$sio_file" | while read decl; do
-            keyword=$(echo "$decl" | awk '{print $1}')
-            oldtype=$(echo "$decl" | awk '{print $2}')
-            newtype=$(echo "$oldtype" | sed 's/^SCX/SCXSIO/')
+          # Extract type declarations and write to temp file
+          grep -oE '(class|struct|enum|protocol) SCX[A-Za-z0-9_]+' "$sio_file" | \
+            awk '{print $2}' | sort -u > "$RENAMES_FILE"
 
+          echo "  Types found: $(cat $RENAMES_FILE)"
+
+          # Process each type
+          while IFS= read -r oldtype; do
+            [ -z "$oldtype" ] && continue
+            newtype=$(echo "$oldtype" | sed 's/^SCX/SCXSIO/')
             echo "  Renaming: $oldtype -> $newtype"
 
-            # Rename in the duplicate file itself
-            sed -i '' "s/${oldtype}/${newtype}/g" "$sio_file"
-
-            # Rename references in ALL SocketIO files (not Starscream)
+            # Rename in ALL SocketIO files (including the _SIO file itself)
             find build-pkg/Sources/SocketIO -name '*.swift' -exec \
               sed -i '' "s/${oldtype}/${newtype}/g" {} +
-          done
+          done < "$RENAMES_FILE"
+        done
+
+        rm -f "$RENAMES_FILE"
+
+        # Verify no duplicates remain
+        echo "Checking for remaining duplicate declarations..."
+        for sio_file in $(find build-pkg/Sources/SocketIO -name '*_SIO.swift' 2>/dev/null); do
+          grep -E '(class|struct|enum|protocol) SCX[A-Z]' "$sio_file" | head -3
         done
 
     - name: Generate build Package.swift
