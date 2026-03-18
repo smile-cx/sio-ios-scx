@@ -128,8 +128,7 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "\(prefix)Starscream", type: .dynamic, targets: ["\(prefix)Starscream"]),
-                .library(name: "\(prefix)SocketIO",   type: .dynamic, targets: ["\(prefix)SocketIO"]),
+                .library(name: "\(prefix)SocketIO", type: .dynamic, targets: ["\(prefix)SocketIO"]),
             ],
             targets: [
                 .target(
@@ -160,7 +159,7 @@ jobs:
     # ── Build XCFrameworks ───────────────────────────────────────────────
     - name: Build XCFrameworks
       run: |
-        SCHEMES=("${PREFIX}Starscream" "${PREFIX}SocketIO")
+        SCHEMES=("${PREFIX}SocketIO")
         ARCHIVE_DIR="$(pwd)/build/archives"
         OUTPUT_DIR="$(pwd)/build/output"
         DD="$(pwd)/build/DerivedData"
@@ -311,9 +310,7 @@ jobs:
 
         shasum -a 256 *.zip | tee checksums.txt
 
-        STAR_CS=$(grep "${PREFIX}Starscream" checksums.txt | awk '{print $1}')
         SIO_CS=$(grep "${PREFIX}SocketIO" checksums.txt | awk '{print $1}')
-        echo "STARSCREAM_CHECKSUM=$STAR_CS" >> $GITHUB_ENV
         echo "SOCKETIO_CHECKSUM=$SIO_CS" >> $GITHUB_ENV
 
     # ── Update Package.swift for consumers ───────────────────────────────
@@ -321,7 +318,6 @@ jobs:
       run: |
         REPO="${{ github.repository }}"
         VER="${{ env.VERSION }}"
-        STAR_CS="${{ env.STARSCREAM_CHECKSUM }}"
         SIO_CS="${{ env.SOCKETIO_CHECKSUM }}"
 
         cat > Package.swift << PKGEOF
@@ -337,15 +333,9 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "SCXSocketIO",   targets: ["SCXSocketIO"]),
-                .library(name: "SCXStarscream", targets: ["SCXStarscream"]),
+                .library(name: "SCXSocketIO", targets: ["SCXSocketIO"]),
             ],
             targets: [
-                .binaryTarget(
-                    name: "SCXStarscream",
-                    url: "https://github.com/${REPO}/releases/download/${VER}/SCXStarscream.xcframework.zip",
-                    checksum: "${STAR_CS}"
-                ),
                 .binaryTarget(
                     name: "SCXSocketIO",
                     url: "https://github.com/${REPO}/releases/download/${VER}/SCXSocketIO.xcframework.zip",
@@ -418,16 +408,14 @@ jobs:
           ### Checksums
           | Artifact | SHA-256 |
           |----------|---------|
-          | SCXStarscream.xcframework.zip | `${{ env.STARSCREAM_CHECKSUM }}` |
-          | SCXSocketIO.xcframework.zip   | `${{ env.SOCKETIO_CHECKSUM }}`   |
+          | SCXSocketIO.xcframework.zip | `${{ env.SOCKETIO_CHECKSUM }}` |
 
           ### What's included
-          - All public types prefixed with `SCX`
-          - PrivacyInfo.xcprivacy embedded in both frameworks
+          - All public types prefixed with `SCX` (Socket.IO + Starscream in single framework)
+          - PrivacyInfo.xcprivacy embedded
           - iOS device + Simulator (arm64, x86_64)
           - Built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES`
         files: |
-          build/output/SCXStarscream.xcframework.zip
           build/output/SCXSocketIO.xcframework.zip
           build/output/checksums.txt
           build/output/LICENSE

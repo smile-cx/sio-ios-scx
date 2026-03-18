@@ -2,7 +2,7 @@
 """
 Prefix all Swift type declarations and their usages across source files.
 
-Usage: python3 prefix-symbols.py <source_dir> <prefix> [--dry-run]
+Usage: python3 prefix-symbols.py <source_dir> <prefix> [--dry-run] [--apply-to <other_dir>]
 
 This script modifies third-party source code by prefixing symbol names.
 This constitutes a modification under both MIT and Apache 2.0 licenses.
@@ -19,6 +19,8 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Dict, Set, List
+from collections import defaultdict
 
 # Types from Foundation/Swift stdlib that must NEVER be prefixed
 SYSTEM_TYPES = frozenset([
@@ -98,31 +100,66 @@ DECL_PATTERN = re.compile(
 )
 
 
-def find_swift_files(source_dir: str) -> list[str]:
+def validate_prefix(prefix: str) -> None:
+    """Validate that prefix is suitable for Swift type names."""
+    if not prefix:
+        print("Error: Prefix cannot be empty", file=sys.stderr)
+        sys.exit(1)
+
+    if not prefix[0].isupper():
+        print(f"Error: Prefix '{prefix}' must start with an uppercase letter", file=sys.stderr)
+        sys.exit(1)
+
+    if not re.match(r'^[A-Z][a-zA-Z0-9]*$', prefix):
+        print(f"Error: Prefix '{prefix}' must contain only alphanumeric characters", file=sys.stderr)
+        sys.exit(1)
+
+    if len(prefix) > 10:
+        print(f"Warning: Prefix '{prefix}' is quite long ({len(prefix)} chars)", file=sys.stderr)
+
+
+def find_swift_files(source_dir: str) -> List[Path]:
     """Find all .swift files recursively."""
-    files = []
-    for root, _, filenames in os.walk(source_dir):
-        for f in filenames:
-            if f.endswith('.swift'):
-                files.append(os.path.join(root, f))
-    return sorted(files)
+    path = Path(source_dir)
+    if not path.exists():
+        print(f"Error: Directory not found: {source_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    if not path.is_dir():
+        print(f"Error: Not a directory: {source_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    files = sorted(path.rglob("*.swift"))
+    return files
 
 
-def extract_symbols(swift_files: list[str]) -> set[str]:
+def extract_symbols(swift_files: List[Path]) -> Set[str]:
     """Extract all type declaration names from Swift files."""
     symbols = set()
+    errors = []
+
     for filepath in swift_files:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
-        for match in DECL_PATTERN.finditer(content):
-            name = match.group(1)
-            if name not in SYSTEM_TYPES:
-                symbols.add(name)
+        try:
+            content = filepath.read_text(encoding='utf-8')
+            for match in DECL_PATTERN.finditer(content):
+                name = match.group(1)
+                if name not in SYSTEM_TYPES:
+                    symbols.add(name)
+        except UnicodeDecodeError:
+            errors.append(f"  ⚠ Failed to read (encoding issue): {filepath.name}")
+        except IOError as e:
+            errors.append(f"  ⚠ Failed to read: {filepath.name} ({e})")
+
+    if errors:
+        print("\nWarnings during symbol extraction:", file=sys.stderr)
+        for err in errors:
+            print(err, file=sys.stderr)
+
     return symbols
 
 
-def rename_symbols_in_content(content: str, rename_map: dict[str, str],
-                              own_types: set[str]) -> str:
+def rename_symbols_in_content(content: str, rename_map: Dict[str, str],
+                              own_types: Set[str]) -> tuple[str, int]:
     """
     Apply symbol renames using whole-word boundary matching.
 
@@ -133,9 +170,12 @@ def rename_symbols_in_content(content: str, rename_map: dict[str, str],
     the qualifier before the dot is one of OUR types or a system type:
     - OurType.Event  -> SCXOurType.SCXEvent  (rename)
     - Stream.Event   -> Stream.Event         (keep)
+
+    Returns: (modified_content, replacement_count)
     """
     # Sort by length descending so longer names are replaced first
     sorted_names = sorted(rename_map.keys(), key=len, reverse=True)
+    total_replacements = 0
 
     for old_name in sorted_names:
         new_name = rename_map[old_name]
@@ -143,6 +183,7 @@ def rename_symbols_in_content(content: str, rename_map: dict[str, str],
 
         def make_replacer(new_name_val):
             def replacer(match):
+                nonlocal total_replacements
                 start = match.start()
                 text = match.string
                 # Check if preceded by a dot (member access)
@@ -156,18 +197,20 @@ def rename_symbols_in_content(content: str, rename_map: dict[str, str],
                     qualifier = text[word_start:word_end]
                     # Only rename if the qualifier is one of our own types
                     if qualifier in own_types:
+                        total_replacements += 1
                         return new_name_val
                     else:
                         return match.group(0)  # system type, don't rename
+                total_replacements += 1
                 return new_name_val
             return replacer
 
         content = pattern.sub(make_replacer(new_name), content)
 
-    return content
+    return content, total_replacements
 
 
-def process_files(source_dir: str, prefix: str, dry_run: bool = False) -> dict[str, str]:
+def process_files(source_dir: str, prefix: str, dry_run: bool = False) -> Dict[str, str]:
     """
     Main processing pipeline:
     1. Find all Swift files
@@ -177,79 +220,112 @@ def process_files(source_dir: str, prefix: str, dry_run: bool = False) -> dict[s
 
     Returns the rename map for use by callers.
     """
+    validate_prefix(prefix)
+
     swift_files = find_swift_files(source_dir)
     if not swift_files:
-        print(f"No Swift files found in {source_dir}")
+        print(f"Error: No Swift files found in {source_dir}", file=sys.stderr)
         sys.exit(1)
-
-    print(f"Found {len(swift_files)} Swift files in {source_dir}")
 
     # Extract symbols
     symbols = extract_symbols(swift_files)
-    print(f"Found {len(symbols)} unique type symbols")
 
     # Build rename map, skip already-prefixed
     rename_map = {}
+    skipped = []
     for sym in sorted(symbols):
         if sym.startswith(prefix):
-            print(f"  [skip] {sym} (already prefixed)")
+            skipped.append(sym)
             continue
         rename_map[sym] = f"{prefix}{sym}"
 
-    print(f"\nRename map ({len(rename_map)} symbols):")
-    for old, new in sorted(rename_map.items()):
-        print(f"  {old} -> {new}")
+    print(f"Found {len(swift_files)} files, {len(symbols)} symbols ({len(rename_map)} to rename)")
 
     if dry_run:
-        print("\n[DRY RUN] No files modified.")
+        print("[DRY RUN] No files modified.")
         return rename_map
 
     # Build the set of "our" types: both original and prefixed names
     own_types = set(rename_map.keys()) | set(rename_map.values())
 
-    # Apply renames
-    print(f"\nApplying renames to {len(swift_files)} files...")
+    # Apply renames to file contents
+    modified_count = 0
+    total_replacements = 0
+    errors = []
+
     for filepath in swift_files:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            original = f.read()
+        try:
+            original = filepath.read_text(encoding='utf-8')
+            modified, replacement_count = rename_symbols_in_content(original, rename_map, own_types)
 
-        modified = rename_symbols_in_content(original, rename_map, own_types)
+            if modified != original:
+                filepath.write_text(modified, encoding='utf-8')
+                modified_count += 1
+                total_replacements += replacement_count
+        except Exception as e:
+            errors.append(f"✗ {filepath.name}: {e}")
 
-        if modified != original:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(modified)
-            print(f"  [modified] {os.path.basename(filepath)}")
-        else:
-            print(f"  [unchanged] {os.path.basename(filepath)}")
+    if errors:
+        for err in errors:
+            print(err, file=sys.stderr)
 
-    print(f"\nPrefixing complete. {len(rename_map)} symbols renamed with prefix '{prefix}'.")
+    # Rename files whose names match a renamed symbol
+    renamed_count = 0
+    for filepath in swift_files:
+        name_without_ext = filepath.stem
+        if name_without_ext in rename_map:
+            new_name = rename_map[name_without_ext] + '.swift'
+            new_path = filepath.parent / new_name
+            try:
+                filepath.rename(new_path)
+                renamed_count += 1
+            except OSError as e:
+                print(f"✗ Failed to rename {filepath.name}: {e}", file=sys.stderr)
+
+    print(f"✓ Modified {modified_count} files, {total_replacements} replacements, {renamed_count} files renamed")
+
     return rename_map
 
 
-def apply_rename_map_to_dir(target_dir: str, rename_map: dict[str, str]):
+def apply_rename_map_to_dir(target_dir: str, rename_map: Dict[str, str]):
     """Apply an existing rename map to all Swift files in target_dir."""
     swift_files = find_swift_files(target_dir)
     if not swift_files:
-        print(f"No Swift files found in {target_dir}")
+        print(f"Warning: No Swift files found in {target_dir}", file=sys.stderr)
         return
 
     own_types = set(rename_map.keys()) | set(rename_map.values())
-    print(f"\nApplying {len(rename_map)} renames to {len(swift_files)} files in {target_dir}...")
+
+    modified_count = 0
+    total_replacements = 0
+    errors = []
+
     for filepath in swift_files:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            original = f.read()
-        modified = rename_symbols_in_content(original, rename_map, own_types)
-        if modified != original:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(modified)
-            print(f"  [modified] {os.path.basename(filepath)}")
-        else:
-            print(f"  [unchanged] {os.path.basename(filepath)}")
+        try:
+            original = filepath.read_text(encoding='utf-8')
+            modified, replacement_count = rename_symbols_in_content(original, rename_map, own_types)
+
+            if modified != original:
+                filepath.write_text(modified, encoding='utf-8')
+                modified_count += 1
+                total_replacements += replacement_count
+        except Exception as e:
+            errors.append(f"✗ {filepath.name}: {e}")
+
+    if errors:
+        for err in errors:
+            print(err, file=sys.stderr)
+
+    print(f"✓ Applied to {modified_count} files, {total_replacements} replacements")
 
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <source_dir> <prefix> [--dry-run] [--apply-to <other_dir>]")
+        print(f"Usage: {sys.argv[0]} <source_dir> <prefix> [--dry-run] [--apply-to <other_dir>]", file=sys.stderr)
+        print(f"\nExamples:", file=sys.stderr)
+        print(f"  {sys.argv[0]} ./Sources SCX", file=sys.stderr)
+        print(f"  {sys.argv[0]} ./Sources SCX --dry-run", file=sys.stderr)
+        print(f"  {sys.argv[0]} ./Starscream SCX --apply-to ./SocketIO", file=sys.stderr)
         sys.exit(1)
 
     source_dir = sys.argv[1]
@@ -262,12 +338,30 @@ if __name__ == '__main__':
         idx = sys.argv.index('--apply-to')
         if idx + 1 < len(sys.argv):
             apply_to = sys.argv[idx + 1]
+        else:
+            print("Error: --apply-to requires a directory argument", file=sys.stderr)
+            sys.exit(1)
 
+    # Validate directories
     if not os.path.isdir(source_dir):
-        print(f"Error: {source_dir} is not a directory")
+        print(f"Error: Source directory not found: {source_dir}", file=sys.stderr)
         sys.exit(1)
 
-    rename_map = process_files(source_dir, prefix, dry_run)
+    if apply_to and not os.path.isdir(apply_to):
+        print(f"Error: Target directory not found: {apply_to}", file=sys.stderr)
+        sys.exit(1)
 
-    if apply_to and os.path.isdir(apply_to) and rename_map:
-        apply_rename_map_to_dir(apply_to, rename_map)
+    try:
+        rename_map = process_files(source_dir, prefix, dry_run)
+
+        if apply_to and rename_map and not dry_run:
+            apply_rename_map_to_dir(apply_to, rename_map)
+
+    except KeyboardInterrupt:
+        print("\nInterrupted by user", file=sys.stderr)
+        sys.exit(130)
+    except Exception as e:
+        print(f"✗ Fatal error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

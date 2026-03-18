@@ -87,9 +87,27 @@ The build is fully automated via GitHub Actions:
 4. The workflow will:
    - Clone Socket.IO and Starscream at the specified versions
    - Prefix all symbols with `SCX`
+   - Add modification notices to source files (license compliance)
    - Build XCFrameworks for iOS device + Simulator
    - Update `Package.swift` with binary target URLs and checksums
    - Create a GitHub Release with the artifacts
+
+## Building Locally
+
+To build XCFrameworks locally for development or testing:
+
+```bash
+./scripts/build-local.sh v16.1.0
+```
+
+This will:
+1. Clone Socket.IO and Starscream at the specified versions
+2. Assemble and prefix all symbols with `SCX`
+3. Add modification notices to source files (Apache 2.0 compliance)
+4. Build XCFrameworks for iOS device + Simulator
+5. Generate checksums
+
+Output will be in `build-local/output/`. Detailed logs are saved to `build-local/logs/` for troubleshooting.
 
 ## Platform Support
 
