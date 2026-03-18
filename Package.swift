@@ -16,7 +16,7 @@ let package = Package(
         .binaryTarget(
             name: "SCXSocketIO",
             url: "https://github.com/smile-cx/sio-ios-scx/releases/download/v15.2.0/SCXSocketIO.xcframework.zip",
-            checksum: "4fb9b68d0779800f384fecc6b281561140f4e63ac45374d44e7b9dd82ffde654"
+            checksum: "b05888bad8fd04551b0ad8d3f1cda8beaa678d656e3a1e877f4b21a0ab4f2dfe"
         ),
     ]
 )
