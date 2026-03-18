@@ -165,6 +165,24 @@ find "$BUILD_PKG/Sources" -name '*.swift' -exec \
     sed -i '' "s/SocketIO\.\([A-Z]\)/${PREFIX}SocketIO.SCX\1/g" {} +
 echo "✓ Cross-module references fixed"
 
+# ── Add modification notices ───────────────────────────────────────
+echo ""
+echo "Adding modification notices to source files..."
+
+if python3 "$SCRIPT_DIR/add-modification-notices.py" "$BUILD_PKG/Sources/${PREFIX}Starscream" > "$LOG_DIR/add-notices-starscream.log" 2>&1; then
+    echo "✓ Starscream modification notices added"
+else
+    log_error "Failed to add Starscream modification notices"
+    exit 1
+fi
+
+if python3 "$SCRIPT_DIR/add-modification-notices.py" "$BUILD_PKG/Sources/${PREFIX}SocketIO" > "$LOG_DIR/add-notices-socketio.log" 2>&1; then
+    echo "✓ SocketIO modification notices added"
+else
+    log_error "Failed to add SocketIO modification notices"
+    exit 1
+fi
+
 # ── Generate Package.swift ─────────────────────────────────────────
 echo ""
 echo "Generating Package.swift..."
@@ -211,87 +229,25 @@ else
 fi
 
 # ── Build XCFrameworks ─────────────────────────────────────────────
-build_archive() {
-    local scheme="$1"
-    local platform="$2"
-    local destination="$3"
-    local archive_path="$4"
-    local log_file="$LOG_DIR/archive-${scheme}-${platform}.log"
-
-    if xcodebuild archive \
-        -scheme "$scheme" \
-        -destination "$destination" \
-        -archivePath "$archive_path" \
-        -derivedDataPath "$DD" \
-        -configuration Release \
-        -skipPackagePluginValidation \
-        SKIP_INSTALL=NO \
-        BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-        ONLY_ACTIVE_ARCH=NO \
-        > "$log_file" 2>&1; then
-        return 0
-    else
-        log_error "$platform build failed. Log: $log_file"
-        tail -20 "$log_file" >&2
-        return 1
-    fi
-}
-
-copy_swift_modules() {
-    local archive="$1"
-    local scheme="$2"
-
-    local fw=$(find "$archive" -name "${scheme}.framework" -type d | head -1)
-    [ -z "$fw" ] && return 1
-
-    local swiftmod=$(find "$DD" "$archive" -name "${scheme}.swiftmodule" -type d 2>/dev/null | grep -v "PackageFrameworks" | head -1)
-    local header=$(find "$DD" "$archive" -name "${scheme}-Swift.h" -type f 2>/dev/null | head -1)
-    local modulemap=$(find "$DD" "$archive" -name "${scheme}.modulemap" -path "*/${scheme}.build/*" -type f 2>/dev/null | head -1)
-
-    [ -n "$swiftmod" ] && mkdir -p "$fw/Modules" && cp -R "$swiftmod" "$fw/Modules/"
-    [ -n "$header" ] && mkdir -p "$fw/Headers" && cp "$header" "$fw/Headers/"
-    [ -n "$modulemap" ] && mkdir -p "$fw/Modules" && cp "$modulemap" "$fw/Modules/module.modulemap"
-}
-
+# Use shared build script (also used by GitHub Actions)
 readonly SCHEMES=("${PREFIX}SocketIO")
 
+cd "$BUILD_PKG"
+
 for SCHEME in "${SCHEMES[@]}"; do
-    echo ""
-    echo "Building $SCHEME XCFramework..."
-
-    IOS_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-iOS.xcarchive"
-    SIM_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-Simulator.xcarchive"
-
-    # Build archives
-    build_archive "$SCHEME" "iOS" "generic/platform=iOS" "$IOS_ARCHIVE" || exit 1
-    build_archive "$SCHEME" "Simulator" "generic/platform=iOS Simulator" "$SIM_ARCHIVE" || exit 1
-
-    # Locate frameworks
-    IOS_FW=$(find "$IOS_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
-    SIM_FW=$(find "$SIM_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
-
-    if [ -z "$IOS_FW" ] || [ -z "$SIM_FW" ]; then
-        log_error "Framework not found in archives"
+    # Call the shared build script
+    "$SCRIPT_DIR/build-xcframework-core.sh" "$SCHEME" "$ARCHIVE_DIR" "$OUTPUT_DIR" "$DD" \
+        > "$LOG_DIR/build-xcframework-${SCHEME}.log" 2>&1 || {
+        log_error "XCFramework build failed for $SCHEME"
+        tail -50 "$LOG_DIR/build-xcframework-${SCHEME}.log" >&2
         exit 1
-    fi
+    }
 
-    # Copy Swift modules
-    copy_swift_modules "$IOS_ARCHIVE" "$SCHEME"
-    copy_swift_modules "$SIM_ARCHIVE" "$SCHEME"
-
-    # Create XCFramework
-    if xcodebuild -create-xcframework \
-        -framework "$IOS_FW" \
-        -framework "$SIM_FW" \
-        -output "$OUTPUT_DIR/${SCHEME}.xcframework" \
-        > "$LOG_DIR/create-xcframework-${SCHEME}.log" 2>&1; then
-        echo "✓ ${SCHEME}.xcframework"
-    else
-        log_error "XCFramework creation failed"
-        cat "$LOG_DIR/create-xcframework-${SCHEME}.log" >&2
-        exit 1
-    fi
+    # Show summary from log
+    tail -30 "$LOG_DIR/build-xcframework-${SCHEME}.log" | grep -E "✓|modules|Sample"
 done
+
+cd ..
 
 # ── Summary ────────────────────────────────────────────────────────
 END_TIME=$(date +%s)

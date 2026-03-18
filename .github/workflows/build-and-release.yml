@@ -111,6 +111,13 @@ jobs:
 
         echo "Cross-module references updated"
 
+    - name: "Step 4: Add modification notices (Apache 2.0 compliance)"
+      run: |
+        # Add modification notices to source files as required by Apache License 2.0 Section 4(b)
+        python3 scripts/add-modification-notices.py "build-pkg/Sources/${PREFIX}Starscream"
+        python3 scripts/add-modification-notices.py "build-pkg/Sources/${PREFIX}SocketIO"
+        echo "Modification notices added to source files"
+
     - name: Generate build Package.swift
       run: |
         cat > build-pkg/Package.swift << 'EOF'
@@ -167,110 +174,9 @@ jobs:
 
         cd build-pkg
 
+        # Use shared build script (same as local builds)
         for SCHEME in "${SCHEMES[@]}"; do
-          echo ""
-          echo "=========================================="
-          echo "Building $SCHEME"
-          echo "=========================================="
-
-          IOS_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-iOS.xcarchive"
-          SIM_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-Simulator.xcarchive"
-
-          # iOS device
-          echo "Archiving for iOS device..."
-          xcodebuild archive \
-            -scheme "$SCHEME" \
-            -destination "generic/platform=iOS" \
-            -archivePath "$IOS_ARCHIVE" \
-            -derivedDataPath "$DD" \
-            -configuration Release \
-            -skipPackagePluginValidation \
-            SKIP_INSTALL=NO \
-            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-            ONLY_ACTIVE_ARCH=NO
-
-          # iOS Simulator
-          echo "Archiving for iOS Simulator..."
-          xcodebuild archive \
-            -scheme "$SCHEME" \
-            -destination "generic/platform=iOS Simulator" \
-            -archivePath "$SIM_ARCHIVE" \
-            -derivedDataPath "$DD" \
-            -configuration Release \
-            -skipPackagePluginValidation \
-            SKIP_INSTALL=NO \
-            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-            ONLY_ACTIVE_ARCH=NO
-
-          # Locate the .framework inside each archive
-          IOS_FW=$(find "$IOS_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
-          SIM_FW=$(find "$SIM_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
-
-          if [ -z "$IOS_FW" ] || [ -z "$SIM_FW" ]; then
-            echo "ERROR: framework not found in archives for $SCHEME"
-            find "$IOS_ARCHIVE" -name "*.framework" -type d 2>/dev/null
-            find "$SIM_ARCHIVE" -name "*.framework" -type d 2>/dev/null
-            exit 1
-          fi
-
-          echo "iOS framework:  $IOS_FW"
-          echo "Sim framework:  $SIM_FW"
-
-          # Copy Swift modules and headers into framework bundles
-          # xcodebuild archive puts swiftmodule/headers in DerivedData, not in .framework
-          for ARCHIVE in "$IOS_ARCHIVE" "$SIM_ARCHIVE"; do
-            FW=$(find "$ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
-            if [ -z "$FW" ]; then continue; fi
-
-            echo "  Searching for swiftmodule and headers in DerivedData and archive..."
-
-            # Search in both the archive AND DerivedData for swiftmodule
-            SWIFTMOD=$(find "$DD" "$ARCHIVE" -name "${SCHEME}.swiftmodule" -type d 2>/dev/null | grep -v "PackageFrameworks" | head -1)
-            HEADER=$(find "$DD" "$ARCHIVE" -name "${SCHEME}-Swift.h" -type f 2>/dev/null | head -1)
-            MODULEMAP=$(find "$DD" "$ARCHIVE" -name "${SCHEME}.modulemap" -path "*/${SCHEME}.build/*" -type f 2>/dev/null | head -1)
-
-            if [ -n "$SWIFTMOD" ]; then
-              mkdir -p "$FW/Modules"
-              cp -R "$SWIFTMOD" "$FW/Modules/"
-              echo "  Copied swiftmodule from: $SWIFTMOD"
-            else
-              echo "  WARNING: swiftmodule not found for $SCHEME"
-              echo "  Searching all .swiftmodule dirs:"
-              find "$DD" "$ARCHIVE" -name "*.swiftmodule" -type d 2>/dev/null | head -10
-            fi
-
-            if [ -n "$HEADER" ]; then
-              mkdir -p "$FW/Headers"
-              cp "$HEADER" "$FW/Headers/"
-              echo "  Copied header from: $HEADER"
-            fi
-
-            if [ -n "$MODULEMAP" ]; then
-              mkdir -p "$FW/Modules"
-              cp "$MODULEMAP" "$FW/Modules/module.modulemap"
-              echo "  Copied modulemap from: $MODULEMAP"
-            fi
-
-            echo "  Framework contents after copy:"
-            find "$FW" -type f | sort
-          done
-
-          # Create XCFramework
-          xcodebuild -create-xcframework \
-            -framework "$IOS_FW" \
-            -framework "$SIM_FW" \
-            -output "$OUTPUT_DIR/${SCHEME}.xcframework"
-
-          echo "$SCHEME.xcframework created successfully"
-
-          # Verify the XCFramework has modules
-          if find "$OUTPUT_DIR/${SCHEME}.xcframework" -name "*.swiftmodule" -type d | grep -q .; then
-            echo "  Modules verified in XCFramework"
-          else
-            echo "  ERROR: Modules MISSING from XCFramework!"
-            find "$OUTPUT_DIR/${SCHEME}.xcframework" -type f | sort
-            exit 1
-          fi
+          ../scripts/build-xcframework-core.sh "$SCHEME" "$ARCHIVE_DIR" "$OUTPUT_DIR" "$DD"
         done
 
         cd ..
