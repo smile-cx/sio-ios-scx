@@ -64,21 +64,25 @@ jobs:
     # ── Assemble sources first, then prefix everything together ─────────
     - name: Assemble build package sources
       run: |
-        # Single target: merge all sources into one directory
-        mkdir -p build-pkg/Sources
+        # Single target with subdirectories to avoid file name collisions
+        # (e.g. both Starscream and SocketIO have SSLSecurity.swift)
+        mkdir -p build-pkg/Sources/Starscream
+        mkdir -p build-pkg/Sources/SocketIO
 
-        # Copy ALL Starscream submodules
+        # Copy Starscream sources into subdirectory
         for dir in starscream-source/Sources/*/; do
-          cp -R "$dir"/* "build-pkg/Sources/" 2>/dev/null || true
+          cp -R "$dir"/* "build-pkg/Sources/Starscream/" 2>/dev/null || true
         done
-        cp starscream-source/Sources/*.swift "build-pkg/Sources/" 2>/dev/null || true
+        cp starscream-source/Sources/*.swift "build-pkg/Sources/Starscream/" 2>/dev/null || true
 
-        # Copy Socket.IO sources (flatten subdirectories)
-        find socketio-source/Source/SocketIO -name '*.swift' -exec cp {} "build-pkg/Sources/" \;
+        # Copy Socket.IO sources preserving subdirectory structure
+        cp -R socketio-source/Source/SocketIO/* "build-pkg/Sources/SocketIO/"
 
-        # Copy PrivacyInfo.xcprivacy
+        # Copy PrivacyInfo.xcprivacy at Sources root
         cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/"
 
+        echo "Starscream files: $(find build-pkg/Sources/Starscream -name '*.swift' | wc -l)"
+        echo "SocketIO files:   $(find build-pkg/Sources/SocketIO -name '*.swift' | wc -l)"
         echo "Total Swift files: $(find build-pkg/Sources -name '*.swift' | wc -l)"
 
     - name: Prefix all symbols (single pass across both libraries)
