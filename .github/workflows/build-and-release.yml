@@ -64,24 +64,22 @@ jobs:
     # ── Assemble sources first, then prefix everything together ─────────
     - name: Assemble build package sources
       run: |
-        mkdir -p build-pkg/Sources/${PREFIX}Starscream
-        mkdir -p build-pkg/Sources/${PREFIX}SocketIO
+        # Single target: merge all sources into one directory
+        mkdir -p build-pkg/Sources
 
-        # Copy ALL Starscream submodules into a flat target directory
+        # Copy ALL Starscream submodules
         for dir in starscream-source/Sources/*/; do
-          cp -R "$dir"/* "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
+          cp -R "$dir"/* "build-pkg/Sources/" 2>/dev/null || true
         done
-        cp starscream-source/Sources/*.swift "build-pkg/Sources/${PREFIX}Starscream/" 2>/dev/null || true
+        cp starscream-source/Sources/*.swift "build-pkg/Sources/" 2>/dev/null || true
 
-        # Copy Socket.IO sources
-        cp -R socketio-source/Source/SocketIO/* "build-pkg/Sources/${PREFIX}SocketIO/"
+        # Copy Socket.IO sources (flatten subdirectories)
+        find socketio-source/Source/SocketIO -name '*.swift' -exec cp {} "build-pkg/Sources/" \;
 
-        # Copy PrivacyInfo.xcprivacy into both targets
-        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/${PREFIX}Starscream/"
-        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/${PREFIX}SocketIO/"
+        # Copy PrivacyInfo.xcprivacy
+        cp Resources/PrivacyInfo.xcprivacy "build-pkg/Sources/"
 
-        echo "Starscream Swift files: $(find build-pkg/Sources/${PREFIX}Starscream -name '*.swift' | wc -l)"
-        echo "SocketIO Swift files:   $(find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' | wc -l)"
+        echo "Total Swift files: $(find build-pkg/Sources -name '*.swift' | wc -l)"
 
     - name: Prefix all symbols (single pass across both libraries)
       run: |
@@ -93,18 +91,17 @@ jobs:
 
     - name: Fix cross-module references
       run: |
-        # Update import statements
-        find build-pkg/Sources/${PREFIX}SocketIO -name '*.swift' -exec \
-          sed -i '' "s/import Starscream/import ${PREFIX}Starscream/g" {} +
+        # Since everything is now in a single module (SCXSocketIO), remove
+        # import Starscream statements (the types are in the same module now)
+        find build-pkg/Sources -name '*.swift' -exec \
+          sed -i '' "s/^import Starscream$//" {} +
 
-        # Update module-qualified references: Module.Foo -> SCXModule.SCXFoo
-        # The prefix script did NOT rename types after "Starscream." or "SocketIO."
-        # because module names are not in own_types. We need to both update the
-        # module name AND prefix the type name.
+        # Fix module-qualified references: Starscream.Foo -> SCXFoo (same module, no qualifier needed)
+        # SocketIO.Foo -> SCXFoo (same module)
         find build-pkg/Sources -name '*.swift' -exec \
           sed -i '' \
-            -e "s/Starscream\.\([A-Z]\)/SCXStarscream.SCX\1/g" \
-            -e "s/SocketIO\.\([A-Z]\)/SCXSocketIO.SCX\1/g" \
+            -e "s/Starscream\.\([A-Z]\)/SCX\1/g" \
+            -e "s/SocketIO\.\([A-Z]\)/SCX\1/g" \
           {} +
 
         echo "Cross-module references updated"
@@ -126,19 +123,12 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "\(prefix)Starscream", type: .dynamic, targets: ["\(prefix)Starscream"]),
-                .library(name: "\(prefix)SocketIO",   type: .dynamic, targets: ["\(prefix)SocketIO"]),
+                .library(name: "\(prefix)SocketIO", type: .dynamic, targets: ["\(prefix)SocketIO"]),
             ],
             targets: [
                 .target(
-                    name: "\(prefix)Starscream",
-                    path: "Sources/\(prefix)Starscream",
-                    resources: [.copy("PrivacyInfo.xcprivacy")]
-                ),
-                .target(
                     name: "\(prefix)SocketIO",
-                    dependencies: [.target(name: "\(prefix)Starscream")],
-                    path: "Sources/\(prefix)SocketIO",
+                    path: "Sources",
                     resources: [.copy("PrivacyInfo.xcprivacy")]
                 ),
             ]
@@ -158,7 +148,7 @@ jobs:
     # ── Build XCFrameworks ───────────────────────────────────────────────
     - name: Build XCFrameworks
       run: |
-        SCHEMES=("${PREFIX}Starscream" "${PREFIX}SocketIO")
+        SCHEMES=("${PREFIX}SocketIO")
         ARCHIVE_DIR="$(pwd)/build/archives"
         OUTPUT_DIR="$(pwd)/build/output"
         DD="$(pwd)/build/DerivedData"
@@ -309,9 +299,7 @@ jobs:
 
         shasum -a 256 *.zip | tee checksums.txt
 
-        STAR_CS=$(grep "${PREFIX}Starscream" checksums.txt | awk '{print $1}')
         SIO_CS=$(grep "${PREFIX}SocketIO" checksums.txt | awk '{print $1}')
-        echo "STARSCREAM_CHECKSUM=$STAR_CS" >> $GITHUB_ENV
         echo "SOCKETIO_CHECKSUM=$SIO_CS" >> $GITHUB_ENV
 
     # ── Update Package.swift for consumers ───────────────────────────────
@@ -319,7 +307,6 @@ jobs:
       run: |
         REPO="${{ github.repository }}"
         VER="${{ env.VERSION }}"
-        STAR_CS="${{ env.STARSCREAM_CHECKSUM }}"
         SIO_CS="${{ env.SOCKETIO_CHECKSUM }}"
 
         cat > Package.swift << PKGEOF
@@ -335,15 +322,9 @@ jobs:
                 .watchOS(.v6)
             ],
             products: [
-                .library(name: "SCXSocketIO",   targets: ["SCXSocketIO"]),
-                .library(name: "SCXStarscream", targets: ["SCXStarscream"]),
+                .library(name: "SCXSocketIO", targets: ["SCXSocketIO"]),
             ],
             targets: [
-                .binaryTarget(
-                    name: "SCXStarscream",
-                    url: "https://github.com/${REPO}/releases/download/${VER}/SCXStarscream.xcframework.zip",
-                    checksum: "${STAR_CS}"
-                ),
                 .binaryTarget(
                     name: "SCXSocketIO",
                     url: "https://github.com/${REPO}/releases/download/${VER}/SCXSocketIO.xcframework.zip",
@@ -416,16 +397,14 @@ jobs:
           ### Checksums
           | Artifact | SHA-256 |
           |----------|---------|
-          | SCXStarscream.xcframework.zip | `${{ env.STARSCREAM_CHECKSUM }}` |
-          | SCXSocketIO.xcframework.zip   | `${{ env.SOCKETIO_CHECKSUM }}`   |
+          | SCXSocketIO.xcframework.zip | `${{ env.SOCKETIO_CHECKSUM }}` |
 
           ### What's included
-          - All public types prefixed with `SCX`
-          - PrivacyInfo.xcprivacy embedded in both frameworks
+          - All public types prefixed with `SCX` (Socket.IO + Starscream merged into single framework)
+          - PrivacyInfo.xcprivacy embedded
           - iOS device + Simulator (arm64, x86_64)
           - Built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES`
         files: |
-          build/output/SCXStarscream.xcframework.zip
           build/output/SCXSocketIO.xcframework.zip
           build/output/checksums.txt
           build/output/LICENSE
