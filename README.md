@@ -20,21 +20,13 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/smile-cx/sio-ios-scx", exact: "v16.1.0")
+    .package(url: "https://github.com/smile-cx/sio-ios-scx", exact: "16.1.1")
 ],
-targets: [
-    .target(
-        name: "YourApp",
-        dependencies: [
-            .product(name: "SCXSocketIO", package: "sio-ios-scx"),
-        ]
-    )
-]
 ```
 
 ### Manual
 
-Download `SCXStarscream.xcframework.zip` and `SCXSocketIO.xcframework.zip` from the [Releases](https://github.com/smile-cx/sio-ios-scx/releases) page, unzip them, and drag both into your Xcode project.
+Download `SCXSocketIO.xcframework.zip` from the [Releases](https://github.com/smile-cx/sio-ios-scx/releases) page, unzip, and drag into your Xcode project.
 
 ## Usage
 
@@ -83,7 +75,7 @@ The build is fully automated via GitHub Actions:
 
 1. Go to **Actions > Build and Release Prefixed Socket.IO**
 2. Click **Run workflow**
-3. Enter the Socket.IO version tag (e.g. `v16.1.0`)
+3. Enter the Socket.IO version tag (e.g. `v16.1.1`)
 4. The workflow will:
    - Clone Socket.IO and Starscream at the specified versions
    - Prefix all symbols with `SCX`
@@ -97,7 +89,7 @@ The build is fully automated via GitHub Actions:
 To build XCFrameworks locally for development or testing:
 
 ```bash
-./scripts/build-local.sh v16.1.0
+./scripts/build-local.sh v16.1.1
 ```
 
 This will:
