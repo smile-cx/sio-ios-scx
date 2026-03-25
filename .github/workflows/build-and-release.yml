@@ -37,7 +37,9 @@ jobs:
     - name: Set version
       run: |
         VERSION="${{ github.event.inputs.version }}"
+        VERSION_SEMVER="${VERSION#v}"
         echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "VERSION_SEMVER=$VERSION_SEMVER" >> $GITHUB_ENV
         echo "Building Socket.IO $VERSION with prefix $PREFIX"
 
     # ── Clone sources ────────────────────────────────────────────────────
@@ -290,7 +292,7 @@ jobs:
 
           Or in `Package.swift`:
           ```swift
-          .package(url: "https://github.com/${{ github.repository }}", exact: "${{ env.VERSION }}")
+          .package(url: "https://github.com/${{ github.repository }}", exact: "${{ env.VERSION_SEMVER }}")
           ```
           Then depend on `"SCXSocketIO"` and/or `"SCXStarscream"`.
 
