@@ -81,6 +81,11 @@ python3 "$SCRIPT_DIR/prefix-symbols.py" "$BUILD_PKG/Sources/${PREFIX}Starscream"
 python3 "$SCRIPT_DIR/prefix-symbols.py" "$BUILD_PKG/Sources/${PREFIX}SocketIO" "$PREFIX" > "$LOG_DIR/prefix-socketio.log" 2>&1 || \
     { log_error "Failed to prefix SocketIO types"; exit 1; }
 
+# Restore RFC 6455 WebSocket HTTP header string literals that were incorrectly renamed
+# by prefix-symbols.py (e.g. "Sec-SCXWebSocket-Version" → "Sec-WebSocket-Version")
+find "$BUILD_PKG/Sources" -name '*.swift' -exec \
+    sed -i '' 's/"Sec-SCXWebSocket-/"Sec-WebSocket-/g' {} +
+
 # Fix cross-module references
 find "$BUILD_PKG/Sources/${PREFIX}SocketIO" -name '*.swift' -exec \
     sed -i '' "s/import Starscream/import ${PREFIX}Starscream/g" {} +
