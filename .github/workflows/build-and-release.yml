@@ -93,6 +93,14 @@ jobs:
         # Now prefix SocketIO's own types (Starscream types already prefixed from step 1)
         python3 scripts/prefix-symbols.py build-pkg/Sources/${PREFIX}SocketIO "$PREFIX"
 
+    - name: "Step 2b: Restore RFC 6455 WebSocket HTTP header string literals"
+      run: |
+        # prefix-symbols.py renames string literals too, turning RFC 6455 headers like
+        # "Sec-WebSocket-Version" into "Sec-SCXWebSocket-Version". Servers reject these
+        # non-standard names with HTTP 400. Restore the correct values.
+        find build-pkg/Sources -name '*.swift' -exec \
+          sed -i '' 's/"Sec-SCXWebSocket-/"Sec-WebSocket-/g' {} +
+
     - name: "Step 3: Fix cross-module references"
       run: |
         # Update import statements
