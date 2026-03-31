@@ -96,10 +96,10 @@ jobs:
     - name: "Step 2b: Restore RFC 6455 WebSocket HTTP header string literals"
       run: |
         # prefix-symbols.py renames string literals too, turning RFC 6455 headers like
-        # "Sec-WebSocket-Version" into "Sec-SCXWebSocket-Version". Servers reject these
+        # "Sec-WebSocket-Version" into "Sec-${PREFIX}WebSocket-Version". Servers reject these
         # non-standard names with HTTP 400. Restore the correct values.
         find build-pkg/Sources -name '*.swift' -exec \
-          sed -i '' 's/"Sec-SCXWebSocket-/"Sec-WebSocket-/g' {} +
+          sed -i '' "s/\"Sec-${PREFIX}WebSocket-/\"Sec-WebSocket-/g" {} +
 
     - name: "Step 3: Fix cross-module references"
       run: |
