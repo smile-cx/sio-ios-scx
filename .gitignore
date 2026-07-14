@@ -63,6 +63,7 @@ fastlane/test_output
 
 # Project specific
 build/
+build-local/
 build-temp/
 dist/
 DerivedData/
