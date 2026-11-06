@@ -76,8 +76,9 @@ The build is fully automated via GitHub Actions:
 
 1. Go to **Actions > Build and Release Prefixed Socket.IO**
 2. Click **Run workflow**
-3. Enter the Socket.IO version tag (e.g. `v16.1.1`)
-4. The workflow will:
+3. Enter the upstream Socket.IO version tag (e.g. `v16.1.1`)
+4. Optionally enter a release tag (e.g. `v16.1.2`). It defaults to the upstream version. Use a new patch number when rebuilding a version that is already published: SPM pins a version to its revision and checksum, so re-publishing under the same version forces every consumer to clear caches.
+5. The workflow will:
    - Clone Socket.IO and Starscream at the specified versions
    - Prefix all symbols with `SCX`
    - Add modification notices to source files (license compliance)

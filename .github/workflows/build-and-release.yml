@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Socket.IO version tag to build (e.g. v16.1.0)'
+        description: 'Upstream Socket.IO version tag to build (e.g. v16.1.0)'
         required: true
         default: 'v16.1.0'
+      release_tag:
+        description: 'Tag to publish as (e.g. v16.1.2). Defaults to the upstream version. Use a new patch number when rebuilding an already published version so SPM consumers pick it up without clearing caches.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -36,16 +40,20 @@ jobs:
 
     - name: Set version
       run: |
-        VERSION="${{ github.event.inputs.version }}"
+        SOURCE_VERSION="${{ github.event.inputs.version }}"
+        VERSION="${{ github.event.inputs.release_tag }}"
+        VERSION="${VERSION:-$SOURCE_VERSION}"
+        VERSION="v${VERSION#v}"
         VERSION_SEMVER="${VERSION#v}"
+        echo "SOURCE_VERSION=$SOURCE_VERSION" >> $GITHUB_ENV
         echo "VERSION=$VERSION" >> $GITHUB_ENV
         echo "VERSION_SEMVER=$VERSION_SEMVER" >> $GITHUB_ENV
-        echo "Building Socket.IO $VERSION with prefix $PREFIX"
+        echo "Building Socket.IO $SOURCE_VERSION with prefix $PREFIX, publishing as $VERSION"
 
     # ── Clone sources ────────────────────────────────────────────────────
     - name: Clone Socket.IO
       run: |
-        git clone --depth 1 --branch "$VERSION" "$SOCKETIO_REPO" socketio-source
+        git clone --depth 1 --branch "$SOURCE_VERSION" "$SOCKETIO_REPO" socketio-source
 
     - name: Clone Starscream (dependency)
       run: |
@@ -288,7 +296,7 @@ jobs:
 
           Pre-compiled **Socket.IO Client Swift** with `SCX` prefix on all symbols to avoid duplicate-symbol conflicts.
 
-          Based on [socket.io-client-swift](https://github.com/socketio/socket.io-client-swift) `${{ env.VERSION }}` + Starscream `${{ env.STARSCREAM_VERSION }}`.
+          Based on [socket.io-client-swift](https://github.com/socketio/socket.io-client-swift) `${{ env.SOURCE_VERSION }}` + Starscream `${{ env.STARSCREAM_VERSION }}`.
 
           ### Installation (SPM)
 
