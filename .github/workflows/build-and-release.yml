@@ -326,6 +326,7 @@ jobs:
           - All public types prefixed with `SCX` (Socket.IO + Starscream in single framework)
           - PrivacyInfo.xcprivacy embedded
           - iOS device + Simulator (arm64, x86_64)
+          - watchOS device + Simulator
           - Built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES`
         files: |
           build/output/SCXSocketIO.xcframework.zip

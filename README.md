@@ -63,6 +63,7 @@ All public types follow the same API as the original Socket.IO Client Swift, wit
 - **SCXStarscream.xcframework** -- Prefixed Starscream WebSocket dependency
 - **PrivacyInfo.xcprivacy** embedded in both frameworks
 - iOS device (arm64) + Simulator (arm64, x86_64)
+- watchOS device + Simulator
 - Built with `BUILD_LIBRARY_FOR_DISTRIBUTION=YES` for binary compatibility
 
 ## Why Prefixed?
@@ -80,7 +81,7 @@ The build is fully automated via GitHub Actions:
    - Clone Socket.IO and Starscream at the specified versions
    - Prefix all symbols with `SCX`
    - Add modification notices to source files (license compliance)
-   - Build XCFrameworks for iOS device + Simulator
+   - Build XCFrameworks for iOS and watchOS (device + Simulator)
    - Update `Package.swift` with binary target URLs and checksums
    - Create a GitHub Release with the artifacts
 
@@ -96,7 +97,7 @@ This will:
 1. Clone Socket.IO and Starscream at the specified versions
 2. Assemble and prefix all symbols with `SCX`
 3. Add modification notices to source files (Apache 2.0 compliance)
-4. Build XCFrameworks for iOS device + Simulator
+4. Build XCFrameworks for iOS and watchOS (device + Simulator)
 5. Generate checksums
 
 Output will be in `build-local/output/`. Detailed logs are saved to `build-local/logs/` for troubleshooting.

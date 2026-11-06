@@ -9,77 +9,78 @@ readonly ARCHIVE_DIR="${2:?}"
 readonly OUTPUT_DIR="${3:?}"
 readonly DD="${4:?}"
 
-readonly IOS_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-iOS.xcarchive"
-readonly SIM_ARCHIVE="$ARCHIVE_DIR/${SCHEME}-Simulator.xcarchive"
+# name|xcodebuild destination
+readonly SLICES=(
+    "iOS|generic/platform=iOS"
+    "iOS-Simulator|generic/platform=iOS Simulator"
+    "watchOS|generic/platform=watchOS"
+    "watchOS-Simulator|generic/platform=watchOS Simulator"
+)
 
 echo "Building $SCHEME XCFramework"
 
-# Build for iOS device - use separate DerivedData to avoid module conflicts
-xcodebuild archive \
-    -scheme "$SCHEME" \
-    -destination "generic/platform=iOS" \
-    -archivePath "$IOS_ARCHIVE" \
-    -derivedDataPath "$DD/iOS" \
-    -configuration Release \
-    -skipPackagePluginValidation \
-    SKIP_INSTALL=NO \
-    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-    ONLY_ACTIVE_ARCH=NO >/dev/null
+FRAMEWORK_ARGS=()
 
-echo "✓ iOS device archived"
+for SLICE in "${SLICES[@]}"; do
+    IFS='|' read -r NAME DESTINATION <<< "$SLICE"
+    ARCHIVE="$ARCHIVE_DIR/${SCHEME}-${NAME}.xcarchive"
 
-# Build for iOS Simulator - use separate DerivedData to avoid module conflicts
-xcodebuild archive \
-    -scheme "$SCHEME" \
-    -destination "generic/platform=iOS Simulator" \
-    -archivePath "$SIM_ARCHIVE" \
-    -derivedDataPath "$DD/Simulator" \
-    -configuration Release \
-    -skipPackagePluginValidation \
-    SKIP_INSTALL=NO \
-    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-    ONLY_ACTIVE_ARCH=NO >/dev/null
+    # Separate DerivedData per platform to avoid module conflicts
+    xcodebuild archive \
+        -scheme "$SCHEME" \
+        -destination "$DESTINATION" \
+        -archivePath "$ARCHIVE" \
+        -derivedDataPath "$DD/$NAME" \
+        -configuration Release \
+        -skipPackagePluginValidation \
+        SKIP_INSTALL=NO \
+        BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+        ONLY_ACTIVE_ARCH=NO >/dev/null
 
-echo "✓ iOS Simulator archived"
+    echo "✓ $NAME archived"
 
-# Locate frameworks in archives
-IOS_FW=$(find "$IOS_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
-SIM_FW=$(find "$SIM_ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
+    FW=$(find "$ARCHIVE" -name "${SCHEME}.framework" -type d | head -1)
+    if [ -z "$FW" ]; then
+        echo "ERROR: Framework not found in $NAME archive" >&2
+        find "$ARCHIVE" -name "*.framework" -type d >&2
+        exit 1
+    fi
 
-if [ -z "$IOS_FW" ] || [ -z "$SIM_FW" ]; then
-    echo "ERROR: Framework not found in archives" >&2
-    find "$IOS_ARCHIVE" "$SIM_ARCHIVE" -name "*.framework" -type d >&2
-    exit 1
-fi
+    # Copy Swift module from DerivedData into framework
+    SWIFTMOD=$(find "$DD/$NAME/Build/Intermediates.noindex/ArchiveIntermediates" -name "${SCHEME}.swiftmodule" -type d 2>/dev/null | head -1)
+    [ -n "$SWIFTMOD" ] || { echo "ERROR: $NAME swiftmodule not found" >&2; exit 1; }
+    mkdir -p "$FW/Modules"
+    cp -R "$SWIFTMOD" "$FW/Modules/"
 
-# Copy Swift modules from DerivedData into frameworks
-SWIFTMOD_IOS=$(find "$DD/iOS/Build/Intermediates.noindex/ArchiveIntermediates" -name "${SCHEME}.swiftmodule" -type d 2>/dev/null | head -1)
-[ -n "$SWIFTMOD_IOS" ] || { echo "ERROR: iOS swiftmodule not found" >&2; exit 1; }
-mkdir -p "$IOS_FW/Modules"
-cp -R "$SWIFTMOD_IOS" "$IOS_FW/Modules/"
-
-SWIFTMOD_SIM=$(find "$DD/Simulator/Build/Intermediates.noindex/ArchiveIntermediates" -name "${SCHEME}.swiftmodule" -type d 2>/dev/null | head -1)
-[ -n "$SWIFTMOD_SIM" ] || { echo "ERROR: Simulator swiftmodule not found" >&2; exit 1; }
-mkdir -p "$SIM_FW/Modules"
-cp -R "$SWIFTMOD_SIM" "$SIM_FW/Modules/"
+    FRAMEWORK_ARGS+=(-framework "$FW")
+done
 
 echo "✓ Swift modules copied"
 
 # Create XCFramework
 xcodebuild -create-xcframework \
-    -framework "$IOS_FW" \
-    -framework "$SIM_FW" \
+    "${FRAMEWORK_ARGS[@]}" \
     -output "$OUTPUT_DIR/${SCHEME}.xcframework" >/dev/null
 
 echo "✓ XCFramework created"
 
-# Verify Swift modules in XCFramework
-IOS_MODULES=$(find "$OUTPUT_DIR/${SCHEME}.xcframework/ios-arm64" -name "*.swiftinterface" 2>/dev/null | wc -l | tr -d ' ')
-SIM_MODULES=$(find "$OUTPUT_DIR/${SCHEME}.xcframework/ios-arm64_x86_64-simulator" -name "*.swiftinterface" 2>/dev/null | wc -l | tr -d ' ')
+# Verify every XCFramework slice is present and carries Swift modules
+XCFW="$OUTPUT_DIR/${SCHEME}.xcframework"
+SLICE_COUNT=0
+for SLICE_DIR in "$XCFW"/*/; do
+    SLICE_DIR="${SLICE_DIR%/}"
+    SLICE_COUNT=$((SLICE_COUNT + 1))
+    MODULES=$(find "$SLICE_DIR" -name "*.swiftinterface" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$MODULES" -gt 0 ]; then
+        echo "✓ Swift modules verified ($(basename "$SLICE_DIR"): $MODULES)"
+    else
+        echo "ERROR: Swift modules MISSING in $(basename "$SLICE_DIR")" >&2
+        exit 1
+    fi
+done
 
-if [ "$IOS_MODULES" -gt 0 ] && [ "$SIM_MODULES" -gt 0 ]; then
-    echo "✓ Swift modules verified (iOS: $IOS_MODULES, Simulator: $SIM_MODULES)"
-else
-    echo "ERROR: Swift modules MISSING! (iOS: $IOS_MODULES, Simulator: $SIM_MODULES)" >&2
+if [ "$SLICE_COUNT" -ne "${#SLICES[@]}" ]; then
+    echo "ERROR: expected ${#SLICES[@]} slices, found $SLICE_COUNT" >&2
+    ls "$XCFW" >&2
     exit 1
 fi
